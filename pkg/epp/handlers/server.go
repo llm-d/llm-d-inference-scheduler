@@ -179,7 +179,6 @@ type RequestContext struct {
 	toolCallingUpstreamPresent     bool
 	toolCallingForwardedPresent    bool
 	toolCallingForwardedComplete   bool
-	toolCallingForwardedBody       []byte
 	toolCallingResponseRecorded    bool
 
 	// responseProcessingDuration is the EPP cost of handling the response. For a
@@ -732,9 +731,6 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				s.HandleResponseBody(ctx, reqCtx, chunk, endOfStream)
 				// Rewrite the model name in response body back to the original client-facing name.
 				chunk, _ = rewriteModelName(upstreamChunk, reqCtx.TargetModelName, reqCtx.IncomingModelName)
-				if endOfStream && !reqCtx.toolCallingResponseEventStream && reqCtx.toolCallingUpstreamDetector != nil {
-					reqCtx.toolCallingForwardedBody = chunk
-				}
 				// For streaming response, we send response chunk back to envoy every time we received it.
 				reqCtx.respBodyResp = generateResponseBodyResponses(chunk, endOfStream, reqCtx.Response.DynamicMetadata)
 				reqCtx.responseProcessingDuration += time.Since(respBodyStart)
@@ -816,10 +812,6 @@ func (s *StreamingServer) finishResponse(ctx context.Context, reqCtx *RequestCon
 		body, _ = rewriteModelName(body, reqCtx.TargetModelName, reqCtx.IncomingModelName)
 		// For non-streaming response, we send response back to envoy after receiving all the response body.
 		reqCtx.respBodyResp = generateResponseBodyResponses(body, setEos, reqCtx.Response.DynamicMetadata)
-		if reqCtx.toolCallingUpstreamDetector != nil {
-			// JSON detection requires the complete document even when Envoy sends split it.
-			reqCtx.toolCallingForwardedBody = body
-		}
 	}
 	if modelStreaming || reqCtx.responseHeadersReceivedAt.IsZero() {
 		reqCtx.responseProcessingDuration += time.Since(start)
@@ -869,7 +861,6 @@ func (r *RequestContext) clearToolCallingResponseDetectors() {
 	if r == nil {
 		return
 	}
-	r.toolCallingForwardedBody = nil
 	if r.toolCallingUpstreamDetector != nil {
 		r.toolCallingUpstreamDetector.Close()
 		r.toolCallingUpstreamDetector = nil
@@ -988,16 +979,10 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 				return status.Errorf(codes.Unknown, "failed to send response back to Envoy: %v", err)
 			}
 			body := response.GetResponseBody().GetResponse().GetBodyMutation().GetStreamedResponse()
-			if r.toolCallingResponseEventStream {
-				r.observeToolCallingResponse(body.GetBody(), body.GetEndOfStream(), true, span)
-			}
+			r.observeToolCallingResponse(body.GetBody(), body.GetEndOfStream(), true, span)
 			if body.GetEndOfStream() {
 				r.toolCallingForwardedComplete = true
 			}
-		}
-		if len(r.respBodyResp) > 0 && r.responseComplete && !r.toolCallingResponseEventStream {
-			r.observeToolCallingResponse(r.toolCallingForwardedBody, true, true, span)
-			r.toolCallingForwardedBody = nil
 		}
 		if r.responseComplete {
 			logger.V(logutil.DEFAULT).Info("EPP sent response body back to proxy")
@@ -1008,10 +993,10 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 	}
 	if r.requestState == bodyResponseResponsesComplete && r.respTrailerResp != nil {
 		// Trailers in responses are not guaranteed
+		r.observeToolCallingResponse(nil, true, true, span)
 		if err := srv.Send(r.respTrailerResp); err != nil {
 			return status.Errorf(codes.Unknown, "failed to send response back to Envoy: %v", err)
 		}
-		r.observeToolCallingResponse(nil, true, true, span)
 		r.toolCallingForwardedComplete = true
 		logger.V(logutil.DEBUG).Info("EPP sent trailer back to proxy")
 	}

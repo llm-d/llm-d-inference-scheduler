@@ -60,9 +60,8 @@ func (summary ResponseSummary) SpanAttributes() []attribute.KeyValue {
 	}
 }
 
-// ResponseDetector observes one response body. For SSE responses it accepts
-// arbitrarily chunked input and buffers only the current line and event data.
-// Completed events are parsed and cleared.
+// ResponseDetector observes one response body. It buffers JSON until completion.
+// For SSE it buffers only the current line and event data, clearing completed events.
 type ResponseDetector struct {
 	surface             reqcommon.APIType
 	eventStream         bool
@@ -86,9 +85,8 @@ func NewResponseDetector(surface reqcommon.APIType, eventStream bool) (*Response
 }
 
 // Observe adds a body chunk and returns whether a tool call has been observed.
-// Non-streaming responses are parsed once at endOfStream; streaming responses
-// are parsed one completed SSE event at a time. Unfinished data events at
-// endOfStream are discarded and marked incomplete.
+// JSON responses are parsed once at endOfStream; SSE responses are parsed one
+// completed event at a time. Unfinished SSE data events are marked incomplete.
 func (detector *ResponseDetector) Observe(chunk []byte, endOfStream bool) bool {
 	if detector == nil {
 		return false
@@ -111,8 +109,13 @@ func (detector *ResponseDetector) Observe(chunk []byte, endOfStream bool) bool {
 			}
 			detector.detectionIncomplete = detector.detectionIncomplete || len(detector.eventData) > 0
 		}
-	} else if endOfStream {
+	} else if !endOfStream {
+		detector.eventData = append(detector.eventData, chunk...)
+	} else if len(detector.eventData) == 0 {
 		detector.observeJSON(chunk)
+	} else {
+		detector.eventData = append(detector.eventData, chunk...)
+		detector.observeJSON(detector.eventData)
 	}
 
 	if endOfStream {
@@ -126,7 +129,7 @@ func (detector *ResponseDetector) DetectionIncomplete() bool {
 	return detector != nil && detector.detectionIncomplete
 }
 
-// Close clears buffered SSE data and prevents further observation.
+// Close clears buffered response data and prevents further observation.
 // Process calls it when the response lifecycle ends, including cancellation
 // or errors before the stream reaches end-of-stream.
 func (detector *ResponseDetector) Close() {

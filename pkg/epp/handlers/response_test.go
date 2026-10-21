@@ -344,6 +344,8 @@ func TestProcessRetainsToolCallingTelemetryOnResponseTermination(t *testing.T) {
 			{name: "evicted before tool call", eventStream: true, evicted: true},
 			{name: "evicted after tool call", eventStream: true, body: toolEvent, evicted: true, wantPresent: true},
 			{name: "JSON reply to streaming request", streamRequest: true, body: toolJSON, endOfStream: true, terminalErr: io.EOF, wantPresent: true},
+			{name: "split JSON reply to streaming request", streamRequest: true, body: toolJSON[:len(toolJSON)/2], finalBody: toolJSON[len(toolJSON)/2:], endOfStream: true, terminalErr: io.EOF, wantPresent: true},
+			{name: "split JSON reply to streaming request with trailers", streamRequest: true, body: toolJSON[:len(toolJSON)/2], finalBody: toolJSON[len(toolJSON)/2:], trailers: true, terminalErr: io.EOF, wantPresent: true},
 			{name: "large JSON reply to streaming request", streamRequest: true, body: largeJSON, endOfStream: true, terminalErr: io.EOF, wantPresent: true},
 			{name: "JSON send failure for streaming request", streamRequest: true, body: largeJSON, endOfStream: true, failBodySend: 2, wantPresent: true, wantForwardedMissing: true, wantErr: true},
 		} {
@@ -654,13 +656,11 @@ func TestClearToolCallingResponseDetectors(t *testing.T) {
 	reqCtx := &RequestContext{
 		toolCallingUpstreamDetector:  upstreamDetector,
 		toolCallingForwardedDetector: forwardedDetector,
-		toolCallingForwardedBody:     partial,
 	}
 	reqCtx.clearToolCallingResponseDetectors()
 
 	assert.Nil(t, reqCtx.toolCallingUpstreamDetector)
 	assert.Nil(t, reqCtx.toolCallingForwardedDetector)
-	assert.Nil(t, reqCtx.toolCallingForwardedBody)
 	assert.False(t, upstreamDetector.Observe(nil, true), "closed upstream detector must discard the partial event")
 	assert.False(t, forwardedDetector.Observe(nil, true), "closed forwarded detector must discard the partial event")
 }

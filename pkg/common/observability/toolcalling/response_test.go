@@ -118,6 +118,30 @@ func TestResponseDetectorJSON(t *testing.T) {
 	}
 }
 
+func TestResponseDetectorFragmentedJSON(t *testing.T) {
+	for _, tt := range []struct {
+		surface reqcommon.APIType
+		body    string
+	}{
+		{reqcommon.APITypeChatCompletions, `{"choices":[{"message":{"tool_calls":[{"function":{"name":"sentinel_name"}}]}}]}`},
+		{reqcommon.APITypeMessages, `{"content":[{"type":"tool_use","name":"sentinel_name"}]}`},
+	} {
+		for _, finalChunk := range []bool{false, true} {
+			detector, err := NewResponseDetector(tt.surface, false)
+			require.NoError(t, err)
+			split := len(tt.body) / 2
+			require.False(t, detector.Observe([]byte(tt.body[:split]), false))
+			require.False(t, detector.DetectionIncomplete())
+			require.Equal(t, finalChunk, detector.Observe([]byte(tt.body[split:]), finalChunk))
+			if !finalChunk {
+				require.True(t, detector.Observe(nil, true))
+			}
+			require.False(t, detector.DetectionIncomplete())
+			require.Empty(t, detector.eventData)
+		}
+	}
+}
+
 func BenchmarkResponseDetectorObserveJSON(b *testing.B) {
 	padding := strings.Repeat("x", 1024)
 	largeArgument := strings.Repeat("x", 64*1024)
