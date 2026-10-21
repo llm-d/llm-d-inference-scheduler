@@ -38,12 +38,15 @@ var hopByHopHeaders = map[string]bool{
 
 // internalForwardingHeaders are set only by the coordinator; a client copy is
 // dropped, and so is a value of forward_response_headers under these names.
-// EPP routes on epp-profile and x-llm-d-pin-host-port.
+// EPP routes on epp-profile and x-llm-d-pin-host-port, and answers
+// Prefer: if-available, the conditional-decode probe's signal, with 412 on
+// any other leg.
 var internalForwardingHeaders = map[string]bool{
 	reqcommon.EPPProfileHeaderKey:         true,
 	reqcommon.RevisionDecisionIDHeaderKey: true,
 	reqcommon.PeerTopologyHeaderKey:       true,
 	routing.EndpointPinHeader:             true,
+	routing.PreferHeader:                  true,
 }
 
 func isForwardableHeader(name string) bool {
