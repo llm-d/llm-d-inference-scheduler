@@ -157,3 +157,17 @@ func promptKey(hashes []blockHash) string {
 	}
 	return string(b)
 }
+
+// promptKeyUint64 is promptKey for sync-attribute prompts that are still
+// []uint64, avoiding a blockHash conversion on the steady-state merge path.
+func promptKeyUint64(hashes []uint64) string {
+	if len(hashes) == 0 {
+		return ""
+	}
+	b := make([]byte, 8+8*len(hashes))
+	binary.LittleEndian.PutUint64(b[:8], uint64(len(hashes)))
+	for i, h := range hashes {
+		binary.LittleEndian.PutUint64(b[8+8*i:], h)
+	}
+	return string(b)
+}

@@ -370,35 +370,56 @@ func (p *dataProducer) mergeRemoteHashes(pods []fwksched.Endpoint) {
 			localSet[promptKey(prompt)] = struct{}{}
 		}
 		active := make(map[string]struct{}, len(set.Prompts))
-		type peerPrompt struct {
-			key    string
-			hashes []blockHash
-		}
-		peers := make([]peerPrompt, 0, len(set.Prompts))
 		for _, prompt := range set.Prompts {
 			if len(prompt) == 0 {
 				continue
 			}
-			hashes := uint64sToBlockHashes(prompt)
-			key := promptKey(hashes)
+			key := promptKeyUint64(prompt)
 			if _, ok := localSet[key]; ok {
 				continue
 			}
 			active[key] = struct{}{}
-			peers = append(peers, peerPrompt{key: key, hashes: hashes})
+		}
+		if p.peerMergedCovers(endpointID, active) {
+			continue
 		}
 		novel := p.reconcilePeerMerged(endpointID, active)
 		if len(novel) == 0 {
 			continue
 		}
 		server := p.makeserver(pod)
-		for _, pp := range peers {
-			if _, ok := novel[pp.key]; !ok {
+		for _, prompt := range set.Prompts {
+			if len(prompt) == 0 {
 				continue
 			}
-			p.indexerInst.Add(pp.hashes, server)
+			key := promptKeyUint64(prompt)
+			if _, ok := novel[key]; !ok {
+				continue
+			}
+			p.indexerInst.Add(uint64sToBlockHashes(prompt), server)
 		}
 	}
+}
+
+// peerMergedCovers reports whether endpointID's remembered set already matches
+// active, so Produce can skip reconcile and Add work on a stable peer window.
+func (p *dataProducer) peerMergedCovers(endpointID string, active map[string]struct{}) bool {
+	v, ok := p.peerMerged.Load(endpointID)
+	if !ok {
+		return false
+	}
+	s := v.(*mergedKeySet)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.keys) != len(active) {
+		return false
+	}
+	for k := range active {
+		if _, ok := s.keys[k]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // reconcilePeerMerged replaces the remembered peer keys for endpointID with

@@ -91,6 +91,58 @@ successful endpoint refreshes, including latency variation; see the
 [Redis syncer README](../pkg/epp/framework/plugins/datalayer/cross_plugin/redis/README.md)
 for transport restrictions and publisher timing.
 
+##### Approximate prefix cross-replica sync cost (microbenchmarks)
+
+These numbers are in-process Go benchmarks (`go test -bench`), not full-cluster
+llm-d-simulator runs. They isolate CPU on the request path and Redis publish
+latency against miniredis. Production Valkey/Redis adds network RTT to publish
+and read misses; the publisher runs off the request path on the cross-replica
+sync interval (default `200ms`, `publishTimeout` default `1s`).
+
+**Request-path `Produce` (96 decode pods, `sharedPrefix` layout, Apple M5 Pro):**
+
+| Mode | Median of 5 | Allocs/op | Relative to sync off |
+| --- | ---: | ---: | ---: |
+| `syncCrossReplicaState=false` | 36 µs | 424 | 1.0x |
+| Syncer configured, empty peer window | 40 µs | 424 | 1.1x |
+| Syncer configured, steady peer window (`maxSyncedHashes`=256 worth of prompts on every pod, already merged) | 134 µs | 1864 | 3.7x |
+
+Empty-window overhead is a `syncerActive` check plus a miss on the optional
+attribute. Steady-state cost is dominated by walking peer prompt keys on each
+pod to confirm the window is unchanged (~100 µs and ~1.4k extra allocs at
+96 pods); novel prompts (window slides) pay additional indexer `Add` work.
+Reproduce with:
+
+```bash
+go test ./pkg/epp/framework/plugins/requestcontrol/dataproducer/approximateprefix/ \
+  -run='^$' -bench=BenchmarkProduceCrossSync -benchmem -count=5
+```
+
+**`redis-syncer` publish/read (miniredis, same host):**
+
+| Operation | Payload | Median of 5 |
+| --- | --- | ---: |
+| `Set` (publish) | 4 prompts × 64 hashes (default window shape) | 47 µs |
+| `Set` (publish) | 1 prompt × 256 hashes | 48 µs |
+| `Set` (publish) | 8 prompts × 256 hashes | 88 µs |
+| `Get` (cached peer aggregate) | after prior `Set` | 0.40 µs |
+
+Reproduce with:
+
+```bash
+go test ./pkg/epp/framework/plugins/datalayer/cross_plugin/redis/ \
+  -run='^$' -bench='BenchmarkSyncer(Set|Get)' -benchmem -count=5
+```
+
+Operational takeaways:
+
+- Prefer sizing decode pools and `maxSyncedHashes` so the steady peer window stays
+  modest; request-path cost scales with pods × prompts in the attribute.
+- Publish latency is on the sync interval, not in `Produce`. Keep `stateTTL`
+  above the refresh interval plus observed publish RTT (include Redis/Valkey
+  network time in cluster measurements).
+- Redis/Valkey must support hash-field TTL (`HPEXPIRE`: Redis 7.4+ or Valkey 9+).
+
 ### Performance Reference Data
 
 The following tables present empirical benchmark results for EPP running with llm-d-simulator simulating Qwen/Qwen3-8B.
