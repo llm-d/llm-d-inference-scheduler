@@ -201,9 +201,9 @@ var _ = Describe("SGLang Connector", func() {
 
 		resp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
-		defer resp.Body.Close() //nolint:errcheck
+		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			bp, _ := io.ReadAll(resp.Body) //nolint:errcheck
+			bp, _ := io.ReadAll(resp.Body)
 			Fail(string(bp))
 		}
 
@@ -258,7 +258,7 @@ var _ = Describe("SGLang Connector", func() {
 
 		resp, err := http.DefaultClient.Do(req)
 		Expect(err).ToNot(HaveOccurred())
-		defer resp.Body.Close() //nolint:errcheck
+		defer resp.Body.Close()
 		Expect(resp.StatusCode).To(Equal(http.StatusOK))
 
 		Eventually(func() int { return len(testInfo.prefillHandler.GetCompletionRequests()) }).Should(Equal(1))
