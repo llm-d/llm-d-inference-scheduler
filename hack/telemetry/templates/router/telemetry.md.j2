@@ -17,7 +17,8 @@ before their completion attributes are set.
 To change this catalog or its Go definitions, edit
 [`registry/`](../pkg/common/observability/semconv/registry/) and run
 `make update-telemetry`. `make verify-telemetry` validates the registry and
-compares regenerated files without modifying the working tree.
+compares regenerated files without modifying the working tree. It is included
+in `make presubmit`. `make test-telemetry` exercises stale-file detection.
 Renaming or removing an attribute key, or changing its value type, requires a
 version bump in the registry's `schema_url`.
 
