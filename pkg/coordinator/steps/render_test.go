@@ -441,6 +441,71 @@ func TestRenderStep_ChatCompletions_MMMetadataWrongModalityDegrades(t *testing.T
 	}
 }
 
+// One mispaired modality voids the whole mm_metadata map: the renderer broke
+// the field's contract, so a correctly-shaped sibling modality does not keep
+// its slice either. The aggregate length check passes here (the ghost video
+// key offsets audio's shortfall), so only the per-modality check catches it.
+func TestRenderStep_ChatCompletions_MMMetadataOneBadModalityVoidsAll(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"token_ids": []int{1, 32000, 32000, 32000, 51000, 51000},
+			"features": map[string]any{
+				"mm_hashes": map[reqcommon.Modality][]string{
+					reqcommon.ModalityImage: {"img-hash"},
+					reqcommon.ModalityAudio: {"aud-hash-0", "aud-hash-1"},
+				},
+				"mm_placeholders": map[reqcommon.Modality][]any{
+					reqcommon.ModalityImage: {map[string]any{"offset": 1, "length": 3}},
+					reqcommon.ModalityAudio: {
+						map[string]any{"offset": 4, "length": 3},
+						map[string]any{"offset": 7, "length": 2},
+					},
+				},
+				"kwargs_data": map[reqcommon.Modality][]string{
+					reqcommon.ModalityImage: {"aW1n"},
+					reqcommon.ModalityAudio: {"YXVkMA", "YXVkMQ"},
+				},
+				"mm_metadata": map[reqcommon.Modality][]string{
+					// image pairs correctly, audio is short, the ghost video
+					// key keeps the aggregate total at 3 == len(entries).
+					reqcommon.ModalityImage: {"img-meta"},
+					reqcommon.ModalityAudio: {"aud-meta"},
+					reqcommon.ModalityVideo: {"vid-meta"},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	step, err := NewRenderStep(nil, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	step.(*RenderStep).SetServiceAddress(server.URL)
+
+	reqCtx := &pipeline.RequestContext{
+		OriginalPath: reqcommon.PathChatCompletions,
+		Body:         map[string]any{"model": "test-model", "messages": []any{}},
+		Model:        "test-model",
+		MultimodalEntries: []pipeline.MultimodalEntry{
+			{Modality: reqcommon.ModalityImage},
+			{Modality: reqcommon.ModalityAudio},
+			{Modality: reqcommon.ModalityAudio},
+		},
+	}
+
+	if err := step.Execute(context.Background(), reqCtx); err != nil {
+		t.Fatalf("expected the request to succeed with degraded mm_metadata, got %v", err)
+	}
+
+	for i, e := range reqCtx.MultimodalEntries {
+		if e.MMMetadata != "" {
+			t.Errorf("entry %d (modality %s) kept mm_metadata %q; one mispaired modality must void the whole map",
+				i, e.Modality, e.MMMetadata)
+		}
+	}
+}
+
 func TestRenderStep_RunsEvenWithNoMultimodal(t *testing.T) {
 	var called bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

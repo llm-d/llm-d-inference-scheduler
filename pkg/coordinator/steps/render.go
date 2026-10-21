@@ -336,15 +336,40 @@ func (s *RenderStep) applyRenderResponse(ctx context.Context, reqCtx *pipeline.R
 		return fmt.Errorf("render returned %d kwargs_data but expected %d", totalKwargs, expected)
 	}
 	// mm_metadata is optional for backward compatibility with older renderers.
-	// A mismatched length degrades rather than fails: the field is an
-	// optimization whose fallback (kwargs_data, validated just above) is on
-	// the same response, so a misbehaving renderer costs the optimization,
-	// not the request. mm_hashes/mm_placeholders/kwargs_data stay strict
+	// An absent field means the renderer predates it and the request simply
+	// takes the kwargs_data path. But once the renderer emits the field, its
+	// slices are part of the contract: a length mismatch, aggregate or
+	// per-modality, means a broken renderer and no entry trusts it — the
+	// whole map is dropped so a misfiled slice cannot leak into any modality.
+	// The request still succeeds: kwargs_data (validated just above) is on
+	// the same response. mm_hashes/mm_placeholders/kwargs_data stay strict
 	// because they have no fallback.
 	if totalMetadata > 0 && totalMetadata != expected {
 		logger.V(logutil.DEFAULT).Info("render returned mismatched mm_metadata; degrading to kwargs_data",
 			"got", totalMetadata, "expected", expected)
 		renderResp.Features.MMMetadata = nil
+	}
+	// Per-modality pairing, checked before any entry takes its slice: a
+	// renderer that files every item under one modality passes the aggregate
+	// check, and the misfiled extras would pair an entry with another
+	// modality's blob.
+	if renderResp.Features.MMMetadata != nil {
+		seenModality := make(map[reqcommon.Modality]bool)
+		for i := range reqCtx.MultimodalEntries {
+			mod := reqCtx.MultimodalEntries[i].Modality
+			if seenModality[mod] {
+				continue
+			}
+			seenModality[mod] = true
+			metadata := renderResp.Features.MMMetadata[mod]
+			if len(metadata) != len(renderResp.Features.MMHashes[mod]) {
+				logger.V(logutil.DEFAULT).Info("render returned mismatched mm_metadata for modality; degrading to kwargs_data",
+					"modality", mod, "got", len(metadata),
+					"expected", len(renderResp.Features.MMHashes[mod]))
+				renderResp.Features.MMMetadata = nil
+				break
+			}
+		}
 	}
 
 	// Entries in order, each pulling its hash/placeholder/kwargs from the
@@ -365,10 +390,7 @@ func (s *RenderStep) applyRenderResponse(ctx context.Context, reqCtx *pipeline.R
 		reqCtx.MultimodalEntries[i].Hash = hashes[idx]
 		reqCtx.MultimodalEntries[i].KwargsData = kwargs[idx]
 		reqCtx.MultimodalEntries[i].Placeholder = placeholders[idx]
-		// Compared against this modality's slice, not the aggregate total: a
-		// renderer that files every item under one modality passes the total
-		// check and would pair entry i with another modality's blob.
-		if len(metadata) == len(hashes) {
+		if idx < len(metadata) {
 			reqCtx.MultimodalEntries[i].MMMetadata = metadata[idx]
 		}
 	}
