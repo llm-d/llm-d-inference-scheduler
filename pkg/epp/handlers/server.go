@@ -731,12 +731,20 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 		// Handle the err and fire an immediate response.
 		if err != nil {
 			recordRequestProcessing()
+			if ctx.Err() == context.Canceled {
+				logger.V(logutil.DEBUG).Info("Request stream cancelled")
+				return ctx.Err()
+			}
 			logger.Error(err, "Failed to process request")
 			resp, err := errcommon.BuildErrResponse(err, reqCtx.apiType())
 			if err != nil {
 				return err
 			}
 			if err := srv.Send(resp); err != nil {
+				if ctx.Err() == context.Canceled {
+					logger.V(logutil.DEBUG).Info("Request stream cancelled while sending response")
+					return ctx.Err()
+				}
 				logger.Error(err, "Send failed")
 				return status.Errorf(codes.Unknown, "failed to send response back to Envoy: %v", err)
 			}
