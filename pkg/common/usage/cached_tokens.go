@@ -342,6 +342,11 @@ func replaceCachedTokensSSELine(line []byte, cachedTokens int) ([]byte, bool) {
 func setCachedTokens(response map[string]any, cachedTokens int) bool {
 	block, ok := response[reqcommon.FieldUsage].(map[string]any)
 	if !ok {
+		// A streamed Responses event such as response.completed carries the
+		// usage block inside its response object.
+		if nested, isEvent := response[reqcommon.FieldResponse].(map[string]any); isEvent {
+			return setCachedTokens(nested, cachedTokens)
+		}
 		return false
 	}
 	details, ok := tokenDetails(block)
