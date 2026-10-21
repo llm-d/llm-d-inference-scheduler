@@ -646,7 +646,8 @@ func setupDatastore(ctx context.Context, epFactory datalayer.EndpointFactory,
 func (r *Runner) registerInTreePlugins() {
 	// request control screeners
 	// Alpha
-	fwkplugin.Register(disaggregatedsetrollout.PluginType, fwkplugin.StabilityAlpha, disaggregatedsetrollout.Factory)
+	fwkplugin.RegisterWithPluginDependencies(disaggregatedsetrollout.PluginType, fwkplugin.StabilityAlpha,
+		disaggregatedsetrollout.Factory, disaggregatedsetrollout.ConfigParser)
 	fwkplugin.Register(endpointpin.PluginType, fwkplugin.StabilityAlpha, endpointpin.Factory)
 
 	// request control response-received handlers
