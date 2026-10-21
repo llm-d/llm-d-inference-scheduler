@@ -39,14 +39,17 @@ var hopByHopHeaders = map[string]bool{
 // internalForwardingHeaders are set only by the coordinator or read by it
 // from a phase response; a client copy is dropped, and so is a value of
 // forward_response_headers under these names. EPP routes on epp-profile and
-// x-llm-d-pin-host-port. The prefill P2P address names the prefill pod a
-// decode request pulls from, so a client cannot choose it.
+// x-llm-d-pin-host-port, and answers Prefer: if-available, the
+// conditional-decode probe's signal, with 412 on any other leg. The prefill
+// P2P address names the prefill pod a decode request pulls from, so a client
+// cannot choose it.
 var internalForwardingHeaders = map[string]bool{
 	reqcommon.EPPProfileHeaderKey:         true,
 	reqcommon.RevisionDecisionIDHeaderKey: true,
 	reqcommon.PeerTopologyHeaderKey:       true,
 	routing.EndpointPinHeader:             true,
 	routing.KVCachePrefillHeader:          true,
+	routing.PreferHeader:                  true,
 }
 
 func isForwardableHeader(name string) bool {

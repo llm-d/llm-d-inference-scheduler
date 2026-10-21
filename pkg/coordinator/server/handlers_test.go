@@ -648,10 +648,11 @@ func TestHandleInference_OverlongRequestIDIsRejected(t *testing.T) {
 }
 
 func TestHandleInference_StripsClientSuppliedInternalHeaders(t *testing.T) {
-	// x-llm-d-peer-topology and epp-profile are headers the coordinator alone injects
-	// (copied from the prefill response, or set to select a profile); a
-	// client-supplied value must never survive into OriginalHeaders, since a
-	// later step trusts it as coordinator-generated.
+	// x-llm-d-peer-topology, epp-profile and Prefer are headers the coordinator
+	// alone injects (copied from the prefill response, set to select a profile,
+	// or set on the conditional-decode probe); a client-supplied value must
+	// never survive into OriginalHeaders, since a later step trusts it as
+	// coordinator-generated and EPP answers a client Prefer: if-available with 412.
 	step := &capturingStep{}
 	p := pipeline.New([]pipeline.Step{step})
 	srv, err := New(config.ServerConfig{}, p, gateway.NewWithTransport(&http.Transport{}, stubGatewayURL))
@@ -661,6 +662,7 @@ func TestHandleInference_StripsClientSuppliedInternalHeaders(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m"}`))
 	req.Header.Set(reqcommon.PeerTopologyHeaderKey, "host=attacker,zone=evil")
 	req.Header.Set(reqcommon.EPPProfileHeaderKey, "decode")
+	req.Header.Set("Prefer", "if-available")
 	req.Header.Set("x-user-data", "keep-me")
 	rec := httptest.NewRecorder()
 	srv.handleInference(rec, req)
@@ -673,6 +675,9 @@ func TestHandleInference_StripsClientSuppliedInternalHeaders(t *testing.T) {
 	}
 	if got := step.captured.OriginalHeaders.Get(reqcommon.EPPProfileHeaderKey); got != "" {
 		t.Fatalf("client-supplied epp-profile must be stripped, got %q", got)
+	}
+	if got := step.captured.OriginalHeaders.Get("Prefer"); got != "" {
+		t.Fatalf("client-supplied Prefer must be stripped, got %q", got)
 	}
 	if got := step.captured.OriginalHeaders.Get("x-user-data"); got != "keep-me" {
 		t.Fatalf("unrelated headers must pass through, got %q", got)
