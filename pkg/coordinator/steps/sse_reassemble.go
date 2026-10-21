@@ -30,7 +30,10 @@ import (
 // carry choices[].token_ids rather than text, under a request_id envelope with
 // no object/id/model fields. The Responses API streams typed events keyed by a
 // data-line type field (response.output_text.delta, response.completed) rather
-// than choices[]; its reply is a response object with an output array.
+// than choices[]; its reply is a response object with an output array. The
+// Anthropic Messages API also streams typed events (message_start,
+// content_block_delta, message_delta, message_stop); its reply is a message
+// object with a content array.
 type sseShape int
 
 const (
@@ -38,6 +41,7 @@ const (
 	sseShapeText
 	sseShapeGenerate
 	sseShapeResponses
+	sseShapeMessages
 )
 
 // Streaming and non-streaming object values. A chat stream tags each chunk
@@ -63,6 +67,30 @@ const (
 	fieldDelta                   = "delta"
 )
 
+// Anthropic Messages API streaming event types (the data-line "type" value), the
+// content-block delta types, and the Messages reply field names that have no shared
+// constant. message_start carries the envelope (id, model, role, initial usage)
+// nested under "message"; content_block_delta carries a text_delta's text;
+// message_delta carries the terminal stop_reason and the authoritative usage;
+// message_stop ends the stream (there is no [DONE] marker). A non-text content
+// block (tool_use, thinking) makes the reply lossy, so force-streaming falls back.
+const (
+	messageEventStart        = "message_start"
+	messageEventContentStart = "content_block_start"
+	messageEventContentDelta = "content_block_delta"
+	messageEventDelta        = "message_delta"
+	messageEventStop         = "message_stop"
+
+	deltaTypeText = "text_delta"
+
+	objectMessage     = "message"
+	fieldMessage      = "message"
+	fieldContentBlock = "content_block"
+	fieldStopReason   = "stop_reason"
+	fieldStopSequence = "stop_sequence"
+	partTypeText      = "text"
+)
+
 // shapeForAPIType maps the API a request used to the reassembly shape its stream
 // folds into. ok is false for an API the force-stream path does not handle; the
 // caller then declines to force-stream rather than misparsing the stream as text.
@@ -78,6 +106,8 @@ func shapeForAPIType(apiType reqcommon.APIType) (sseShape, bool) {
 		return sseShapeGenerate, true
 	case reqcommon.APITypeResponses:
 		return sseShapeResponses, true
+	case reqcommon.APITypeMessages:
+		return sseShapeMessages, true
 	default:
 		return 0, false
 	}
@@ -139,6 +169,16 @@ type sseReassembler struct {
 	// that forceStreamLossy cannot predict from the request.
 	lossyFrame bool
 
+	// Messages-shape accumulators. The Anthropic reply is assembled from its events
+	// rather than captured verbatim: the envelope role, the text folded across
+	// content_block_delta events, the terminal stop_reason/stop_sequence, and whether
+	// a terminal event (message_delta or message_stop) was seen.
+	messageRole      string
+	messageText      strings.Builder
+	stopReason       any
+	stopSequence     any
+	messagesTerminal bool
+
 	contentBytes int64
 }
 
@@ -151,6 +191,10 @@ func newSSEReassembler(shape sseShape, maxChoices int) *sseReassembler {
 func (r *sseReassembler) add(frame map[string]any) {
 	if r.shape == sseShapeResponses {
 		r.addResponses(frame)
+		return
+	}
+	if r.shape == sseShapeMessages {
+		r.addMessages(frame)
 		return
 	}
 	r.captureMeta(frame)
@@ -190,6 +234,72 @@ func (r *sseReassembler) addResponses(frame map[string]any) {
 		if resp, ok := frame[fieldResponse].(map[string]any); ok {
 			r.responseObject = resp
 		}
+	}
+}
+
+// addMessages folds one Anthropic Messages event, keyed by its data-line type.
+// message_start carries the envelope (id, model, role, initial usage) nested under
+// "message"; content_block_delta's text_delta accumulates the reply text (other
+// delta types, and any non-text content_block_start, mark the reply lossy so it
+// falls back and keeps the dropped block); message_delta carries the terminal
+// stop_reason and authoritative usage; message_stop ends the stream. terminated()
+// reports true once message_delta or message_stop is seen, since there is no [DONE].
+func (r *sseReassembler) addMessages(frame map[string]any) {
+	switch frame[reqcommon.FieldType] {
+	case messageEventStart:
+		msg, ok := frame[fieldMessage].(map[string]any)
+		if !ok {
+			return
+		}
+		if id, ok := msg["id"].(string); ok && r.id == "" {
+			r.id = id
+		}
+		if model, ok := msg[reqcommon.FieldModel].(string); ok && r.model == "" {
+			r.model = model
+		}
+		if role, ok := msg[reqcommon.FieldRole].(string); ok && r.messageRole == "" {
+			r.messageRole = role
+		}
+		if usage, ok := msg[reqcommon.FieldUsage].(map[string]any); ok {
+			r.mergeUsage(usage)
+		}
+	case messageEventContentStart:
+		// A non-text block (tool_use, thinking) is announced here before any delta;
+		// the fold keeps only text, so flag the reply lossy.
+		if block, ok := frame[fieldContentBlock].(map[string]any); ok {
+			if t, ok := block[reqcommon.FieldType].(string); ok && t != partTypeText {
+				r.lossyFrame = true
+			}
+		}
+	case messageEventContentDelta:
+		delta, ok := frame[fieldDelta].(map[string]any)
+		if !ok {
+			return
+		}
+		if t, ok := delta[reqcommon.FieldType].(string); ok && t != deltaTypeText {
+			// input_json_delta (tool_use) or thinking_delta: not folded, so lossy.
+			r.lossyFrame = true
+			return
+		}
+		if text, ok := delta[partTypeText].(string); ok {
+			r.messageText.WriteString(text)
+			r.contentBytes += int64(len(text))
+		}
+	case messageEventDelta:
+		if delta, ok := frame[fieldDelta].(map[string]any); ok {
+			if sr, ok := delta[fieldStopReason]; ok {
+				r.stopReason = sr
+			}
+			if ss, ok := delta[fieldStopSequence]; ok {
+				r.stopSequence = ss
+			}
+		}
+		if usage, ok := frame[reqcommon.FieldUsage].(map[string]any); ok {
+			r.mergeUsage(usage)
+		}
+		r.messagesTerminal = true
+	case messageEventStop:
+		r.messagesTerminal = true
 	}
 }
 
@@ -366,6 +476,9 @@ func (r *sseReassembler) result() map[string]any {
 		// own status, usage, and (on failure) error.
 		return r.responseObject
 	}
+	if r.shape == sseShapeMessages {
+		return r.messagesResult()
+	}
 
 	out := map[string]any{}
 	r.writeEnvelope(out)
@@ -387,14 +500,60 @@ func (r *sseReassembler) result() map[string]any {
 	return out
 }
 
+// messagesResult builds the Anthropic Messages reply from the folded events: the
+// envelope (id, type, role, model), one text content block, the terminal
+// stop_reason/stop_sequence, and usage trimmed to input_tokens/output_tokens so the
+// forced reply matches the pod's non-streaming body. Reassembly runs only for a
+// text-only reply; a non-text block flags lossyFrame and falls back before here.
+func (r *sseReassembler) messagesResult() map[string]any {
+	role := r.messageRole
+	if role == "" {
+		role = reqcommon.RoleAssistant
+	}
+	out := map[string]any{
+		reqcommon.FieldType: objectMessage,
+		reqcommon.FieldRole: role,
+		reqcommon.FieldContent: []any{
+			map[string]any{reqcommon.FieldType: partTypeText, partTypeText: r.messageText.String()},
+		},
+	}
+	if r.id != "" {
+		out["id"] = r.id
+	}
+	if r.model != "" {
+		out[reqcommon.FieldModel] = r.model
+	}
+	if r.stopReason != nil {
+		out[fieldStopReason] = r.stopReason
+	}
+	if r.stopSequence != nil {
+		out[fieldStopSequence] = r.stopSequence
+	}
+	if r.usage != nil {
+		usage := map[string]any{}
+		if v, ok := r.usage[reqcommon.FieldInputTokens]; ok {
+			usage[reqcommon.FieldInputTokens] = v
+		}
+		if v, ok := r.usage[reqcommon.FieldOutputTokens]; ok {
+			usage[reqcommon.FieldOutputTokens] = v
+		}
+		out[reqcommon.FieldUsage] = usage
+	}
+	return out
+}
+
 // terminated reports whether a frame signalled the end of generation: a Responses
-// terminal event (captured as responseObject) or, for the other shapes, a
-// finish_reason on any choice. The scan loop pairs it with the data: [DONE] marker
-// to tell a complete stream from one cut off before its end, since the Responses
-// stream may close on its terminal event without a [DONE] line.
+// terminal event (captured as responseObject), a Messages terminal event
+// (message_delta or message_stop), or, for the other shapes, a finish_reason on any
+// choice. The scan loop pairs it with the data: [DONE] marker to tell a complete
+// stream from one cut off before its end, since the Responses and Messages streams
+// close on their terminal event without a [DONE] line.
 func (r *sseReassembler) terminated() bool {
 	if r.shape == sseShapeResponses {
 		return r.responseObject != nil
+	}
+	if r.shape == sseShapeMessages {
+		return r.messagesTerminal
 	}
 	for _, c := range r.choices {
 		if c.hasFinish {

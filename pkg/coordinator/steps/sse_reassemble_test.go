@@ -212,6 +212,7 @@ func TestShapeForAPIType(t *testing.T) {
 		{reqcommon.APITypeCompletions, sseShapeText},
 		{reqcommon.APITypeVLLMGenerate, sseShapeGenerate},
 		{reqcommon.APITypeResponses, sseShapeResponses},
+		{reqcommon.APITypeMessages, sseShapeMessages},
 	} {
 		got, ok := shapeForAPIType(tc.apiType)
 		require.True(t, ok)
@@ -220,7 +221,7 @@ func TestShapeForAPIType(t *testing.T) {
 
 	// An API the force-stream path does not handle reports ok=false, so the caller
 	// declines to force-stream rather than misparsing the stream as text.
-	_, ok := shapeForAPIType(reqcommon.APITypeMessages)
+	_, ok := shapeForAPIType(reqcommon.APITypeSGLangGenerate)
 	require.False(t, ok)
 }
 
@@ -362,6 +363,93 @@ func TestSSEReassemble_ResponsesNoTerminalEventNotTerminated(t *testing.T) {
 	r.add(frame(t, `{"type":"response.output_text.delta","delta":"hi"}`))
 
 	require.False(t, r.terminated(), "a Responses stream with no terminal event is not a complete reply")
+}
+
+// The Anthropic Messages stream is typed events; the reply is assembled from the
+// envelope (message_start), the text deltas (content_block_delta/text_delta), and
+// the terminal message_delta (stop_reason + authoritative usage). The reassembled
+// reply must match the pod's non-streaming message object.
+func TestSSEReassemble_Messages(t *testing.T) {
+	r := newSSEReassembler(sseShapeMessages, 0)
+	r.add(frame(t, `{"type":"message_start","message":{"id":"msg_1","model":"claude","role":"assistant","usage":{"input_tokens":25}}}`))
+	r.add(frame(t, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}`))
+	r.add(frame(t, `{"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}}`))
+	r.add(frame(t, `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":25,"output_tokens":2}}`))
+	r.add(frame(t, `{"type":"message_stop"}`))
+
+	require.True(t, r.terminated())
+	require.EqualValues(t, len("Hello world"), r.bufferedBytes())
+
+	got := r.result()
+	require.Equal(t, "msg_1", got["id"])
+	require.Equal(t, "message", got["type"])
+	require.Equal(t, "assistant", got["role"])
+	require.Equal(t, "claude", got["model"])
+	require.Equal(t, "end_turn", got["stop_reason"])
+
+	content := got["content"].([]any)
+	require.Len(t, content, 1)
+	block := content[0].(map[string]any)
+	require.Equal(t, "text", block["type"])
+	require.Equal(t, "Hello world", block["text"])
+
+	// Usage is trimmed to input/output tokens, matching the non-streaming body.
+	usage := got["usage"].(map[string]any)
+	require.EqualValues(t, 25, usage["input_tokens"])
+	require.EqualValues(t, 2, usage["output_tokens"])
+}
+
+// message_delta usage is cumulative and authoritative: its input_tokens supersede
+// the message_start value and its output_tokens are added.
+func TestSSEReassemble_MessagesUsageMerge(t *testing.T) {
+	r := newSSEReassembler(sseShapeMessages, 0)
+	r.add(frame(t, `{"type":"message_start","message":{"usage":{"input_tokens":2679,"output_tokens":3}}}`))
+	r.add(frame(t, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}`))
+	r.add(frame(t, `{"type":"message_delta","usage":{"input_tokens":10682,"output_tokens":510}}`))
+
+	usage := r.result()["usage"].(map[string]any)
+	require.EqualValues(t, 10682, usage["input_tokens"], "message_delta input_tokens supersede message_start")
+	require.EqualValues(t, 510, usage["output_tokens"])
+}
+
+// A non-text content block marks the reply lossy so force-streaming falls back and
+// the pass-through keeps the block. It is detected both when announced in
+// content_block_start and when its delta arrives.
+func TestSSEReassemble_MessagesNonTextLossy(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		frame string
+	}{
+		{"tool_use content_block_start", `{"type":"content_block_start","content_block":{"type":"tool_use","id":"t1","name":"get_weather"}}`},
+		{"input_json_delta", `{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{\"city\""}}`},
+		{"thinking_delta", `{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"let me think"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newSSEReassembler(sseShapeMessages, 0)
+			r.add(frame(t, `{"type":"message_start","message":{"id":"m","role":"assistant"}}`))
+			require.False(t, r.lossyFrame)
+			r.add(frame(t, tc.frame))
+			require.True(t, r.lossyFrame, "a non-text block must flag the reply lossy")
+		})
+	}
+}
+
+// A text content_block_start and a text_delta do not make the reply lossy.
+func TestSSEReassemble_MessagesTextNotLossy(t *testing.T) {
+	r := newSSEReassembler(sseShapeMessages, 0)
+	r.add(frame(t, `{"type":"content_block_start","content_block":{"type":"text","text":""}}`))
+	r.add(frame(t, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}`))
+	require.False(t, r.lossyFrame)
+}
+
+// Without a terminal event (message_delta/message_stop), a Messages stream is not a
+// complete reply: terminated reports false and scanForcedResponse treats it as a
+// truncation and falls back.
+func TestSSEReassemble_MessagesNoTerminalNotTerminated(t *testing.T) {
+	r := newSSEReassembler(sseShapeMessages, 0)
+	r.add(frame(t, `{"type":"message_start","message":{"id":"m"}}`))
+	r.add(frame(t, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}`))
+	require.False(t, r.terminated())
 }
 
 // Frames mirror the real vLLM /inference/v1/generate stream: one token_id per

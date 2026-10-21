@@ -324,10 +324,20 @@ func (s *DecodeStep) executeForceStream(ctx context.Context, logger logr.Logger,
 // forceStreamLossy reports whether force-streaming would drop fields the
 // reassembler does not fold. The chat and text shapes fold only generated text,
 // so a request that may produce tool calls, function calls, logprobs, or chat
-// reasoning content takes the pass-through to keep them. The responses shape
-// emits the upstream object verbatim (keeping those fields) and generate has
-// none, so neither is lossy.
+// reasoning content takes the pass-through to keep them. The Messages shape folds
+// only text content blocks, so a request declaring tools takes the pass-through to
+// keep tool_use blocks (a server-side tool_use or thinking block it does not declare
+// is caught on the frame instead). The responses shape emits the upstream object
+// verbatim (keeping those fields) and generate has none, so neither is lossy.
 func forceStreamLossy(shape sseShape, body map[string]any) bool {
+	if shape == sseShapeMessages {
+		if tools, ok := reqcommon.FieldValue(body, reqcommon.FieldTools); ok {
+			if arr, ok := tools.([]any); ok && len(arr) > 0 {
+				return true
+			}
+		}
+		return false
+	}
 	if shape != sseShapeChat && shape != sseShapeText {
 		return false
 	}
@@ -410,25 +420,16 @@ func forceStreamBody(src map[string]any, shape sseShape) map[string]any {
 	return body
 }
 
-// maxFrameBytes bounds a single SSE line. The chunk shapes cap at the smaller of
-// the reservation and forceStreamMaxFrameBytes, so a frame larger than the
-// reservation is rejected whether or not it reaches 1 MiB; with the default
-// per-request cap the reservation stays under 1 MiB and binds first. The Responses
-// shape delivers its whole reply in one terminal frame that echoes the request's
-// own fields (tools, instructions, schema) back, so it is capped at the reservation
-// plus the request body size: the generated text is bounded by the reservation and
-// the echoed fields cannot exceed the request they came from. The result is clamped
-// to int so a value above the platform int width cannot wrap negative when it sizes
-// the scanner buffer.
 // maxFrameBytes caps a single SSE line the scanner will buffer. For the chunk
-// shapes the cap is the reservation, with forceStreamMaxFrameBytes only as a ceiling
-// for the rare case a reservation exceeds 1 MiB; under the default per-request cap
-// the reservation stays below 1 MiB and is the binding limit. The Responses shape
-// delivers its whole reply in one terminal frame that echoes the request's fields
-// (tools, instructions, schema) back, so it is allowed the reservation plus the
-// request body size. The result is clamped to int so a cap above the platform int
-// width cannot wrap negative when it sizes the scanner buffer (reachable only with a
-// multi-GiB per-request size on a 32-bit build).
+// shapes (and Messages, which reassembles text incrementally) the cap is the
+// reservation, with forceStreamMaxFrameBytes only as a ceiling for the rare case a
+// reservation exceeds 1 MiB; under the default per-request cap the reservation stays
+// below 1 MiB and is the binding limit. The Responses shape delivers its whole reply
+// in one terminal frame that echoes the request's fields (tools, instructions,
+// schema) back, so it is allowed the reservation plus the request body size. The
+// result is clamped to int so a cap above the platform int width cannot wrap
+// negative when it sizes the scanner buffer (reachable only with a multi-GiB
+// per-request size on a 32-bit build).
 func maxFrameBytes(shape sseShape, reserved, requestBytes int64) int {
 	frameCap := reserved
 	if shape == sseShapeResponses {
@@ -500,12 +501,12 @@ func scanForcedResponse(r io.Reader, reassembler *sseReassembler, reserved, requ
 		return fmt.Errorf("force-stream: read upstream: %w", err)
 	}
 	// The reassembly must have a terminal signal, or it would look complete while
-	// omitting a cut-off tail. The Responses shape has one only when a terminal
-	// event captured the response object (its sole carrier of status and usage), so
-	// it is required there even after a [DONE] line. The other shapes accept either a
-	// finish_reason or the [DONE] marker. A stream with neither falls back rather
-	// than return a truncated reply as a 200.
-	if reassembler.shape == sseShapeResponses {
+	// omitting a cut-off tail. The Responses and Messages shapes close on their own
+	// terminal event with no [DONE] line, so a terminal event is required there
+	// (terminated() keys on the captured terminal state). The other shapes accept
+	// either a finish_reason or the [DONE] marker. A stream with neither falls back
+	// rather than return a truncated reply as a 200.
+	if reassembler.shape == sseShapeResponses || reassembler.shape == sseShapeMessages {
 		if !reassembler.terminated() {
 			return errForceStreamTruncated
 		}

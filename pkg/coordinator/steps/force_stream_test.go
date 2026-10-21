@@ -178,6 +178,14 @@ func TestForceStreamLossy(t *testing.T) {
 	// such fields, so neither is ever lossy even when the request declares them.
 	require.False(t, forceStreamLossy(sseShapeResponses, map[string]any{"tools": []any{map[string]any{"type": "function"}}}))
 	require.False(t, forceStreamLossy(sseShapeGenerate, map[string]any{"logprobs": true}))
+
+	// The messages shape folds only text blocks, so a request declaring tools is
+	// lossy (tool_use blocks would be dropped); logprobs/reasoning are not Messages
+	// concepts and do not gate it.
+	require.True(t, forceStreamLossy(sseShapeMessages, map[string]any{"tools": []any{map[string]any{"name": "get_weather"}}}))
+	require.False(t, forceStreamLossy(sseShapeMessages, map[string]any{"tools": []any{}}))
+	require.False(t, forceStreamLossy(sseShapeMessages, map[string]any{}))
+	require.False(t, forceStreamLossy(sseShapeMessages, map[string]any{"logprobs": true}))
 }
 
 // TestForceStreamLossy_RawMessageFields guards the production body shape: the
@@ -227,6 +235,13 @@ func TestForceStreamLossy_RawMessageFields(t *testing.T) {
 	// A plain request with no lossy field stays force-streamable.
 	require.False(t, forceStreamLossy(sseShapeChat,
 		rawBody(t, `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}]}`)))
+
+	// The Messages shape resolves tools through the same path: a json.RawMessage
+	// tools array is detected, a plain request is not.
+	require.True(t, forceStreamLossy(sseShapeMessages,
+		rawBody(t, `{"model":"m","stream":false,"tools":[{"name":"get_weather"}]}`)))
+	require.False(t, forceStreamLossy(sseShapeMessages,
+		rawBody(t, `{"model":"m","stream":false,"messages":[{"role":"user","content":"hi"}]}`)))
 }
 
 // TestForceStreamBody_StreamOptions checks the forced body enables streaming and,
@@ -259,8 +274,8 @@ func TestForceStreamBody_StreamOptions(t *testing.T) {
 		require.Equal(t, true, opts["include_usage"])
 	})
 
-	t.Run("no stream_options for responses or generate", func(t *testing.T) {
-		for _, shape := range []sseShape{sseShapeResponses, sseShapeGenerate} {
+	t.Run("no stream_options for responses, generate, or messages", func(t *testing.T) {
+		for _, shape := range []sseShape{sseShapeResponses, sseShapeGenerate, sseShapeMessages} {
 			body := forceStreamBody(map[string]any{"model": "m"}, shape)
 			require.Equal(t, true, body["stream"])
 			_, has := body["stream_options"]
@@ -616,6 +631,120 @@ func TestForceStream_Responses_ReassemblesToJSON(t *testing.T) {
 
 	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
 	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation must be released after the reply")
+}
+
+func TestForceStream_Messages_ReassemblesToJSON(t *testing.T) {
+	// The Anthropic Messages stream: typed events, no stream_options, no [DONE]
+	// (ends on message_stop). sseServer appends a trailing [DONE] which the scanner
+	// harmlessly breaks on after message_stop already marked the stream terminal.
+	frames := []string{
+		`{"type":"message_start","message":{"id":"msg_1","model":"claude","role":"assistant","usage":{"input_tokens":5}}}`,
+		`{"type":"content_block_start","content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}`,
+		`{"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":5,"output_tokens":2}}`,
+		`{"type":"message_stop"}`,
+	}
+	var upstreamBody map[string]any
+	server := sseServer(t, frames, &upstreamBody)
+	defer server.Close()
+
+	step, reg := newForceStreamStep(t, server.URL, "1GiB")
+
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-msg",
+		OriginalPath:     reqcommon.PathMessages,
+		Model:            "claude",
+		Stream:           false,
+		KVTransferParams: map[string]any{},
+		Body: map[string]any{
+			"model":      "claude",
+			"stream":     false,
+			"max_tokens": 16,
+			"messages":   []any{map[string]any{"role": "user", "content": "hi"}},
+		},
+		ResponseWriter: recorder,
+	}
+
+	require.NoError(t, step.Execute(context.Background(), reqCtx))
+
+	// Messages has no stream_options; force-stream enables streaming without it.
+	require.Equal(t, true, upstreamBody["stream"], "force-stream must send stream:true upstream")
+	_, hasOpts := upstreamBody["stream_options"]
+	require.False(t, hasOpts, "force-stream must not add stream_options for the Messages API")
+
+	result := recorder.Result()
+	require.Equal(t, http.StatusOK, result.StatusCode)
+	require.Equal(t, "application/json", result.Header.Get("Content-Type"))
+
+	var got map[string]any
+	respBody, _ := io.ReadAll(result.Body)
+	require.NoError(t, json.Unmarshal(respBody, &got), "reassembled reply must be valid JSON")
+	require.Equal(t, "msg_1", got["id"])
+	require.Equal(t, "message", got["type"])
+	require.Equal(t, "assistant", got["role"])
+	require.Equal(t, "end_turn", got["stop_reason"])
+	block := got["content"].([]any)[0].(map[string]any)
+	require.Equal(t, "text", block["type"])
+	require.Equal(t, "Hello world", block["text"])
+	usage := got["usage"].(map[string]any)
+	require.EqualValues(t, 5, usage["input_tokens"])
+	require.EqualValues(t, 2, usage["output_tokens"])
+
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9, "reservation must be released after the reply")
+}
+
+// A Messages stream carrying a non-text block (server-side tool_use the request did
+// not declare) is detected mid-stream and falls back to the pass-through, which
+// preserves the block. Counted fallback_unsupported.
+func TestForceStream_Messages_NonTextFallsBack(t *testing.T) {
+	passthroughReply := `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"get_weather","input":{}}],"stop_reason":"tool_use"}`
+	var streams []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var parsed map[string]any
+		_ = json.Unmarshal(raw, &parsed)
+		streams = append(streams, parsed["stream"])
+		if parsed["stream"] == true {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			flusher := w.(http.Flusher)
+			fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\"}}\n\n")
+			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"content_block\":{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"get_weather\"}}\n\n")
+			flusher.Flush()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(passthroughReply))
+	}))
+	defer server.Close()
+
+	step, reg := newForceStreamStep(t, server.URL, "1GiB")
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-msg-tool",
+		OriginalPath:     reqcommon.PathMessages,
+		Model:            "claude",
+		Stream:           false,
+		KVTransferParams: map[string]any{},
+		Body: map[string]any{
+			"model": "claude", "stream": false, "max_tokens": 16,
+			"messages": []any{map[string]any{"role": "user", "content": "weather?"}},
+		},
+		ResponseWriter: recorder,
+	}
+
+	require.NoError(t, step.Execute(context.Background(), reqCtx), "a non-text block must fall back, not drop silently")
+	result := recorder.Result()
+	require.Equal(t, http.StatusOK, result.StatusCode)
+	body, _ := io.ReadAll(result.Body)
+	require.JSONEq(t, passthroughReply, string(body), "the pass-through reply keeps the tool_use block")
+	require.Equal(t, []any{true, false}, streams, "a forced attempt (stream:true) then a pass-through (stream:false)")
+	require.InDelta(t, 1.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultFallbackUnsupported), 1e-9)
+	require.InDelta(t, 0.0, forceStreamCount(t, reg, coordmetrics.ForceStreamResultForced), 1e-9)
+	require.InDelta(t, 0.0, forceStreamGauge(t, reg), 1e-9)
 }
 
 func TestForceStream_Text_ReassemblesToJSON(t *testing.T) {
@@ -1540,6 +1669,28 @@ func TestScanForcedResponse_TerminalMarker(t *testing.T) {
 			name:      "responses truncated",
 			shape:     sseShapeResponses,
 			stream:    `data: {"type":"response.output_text.delta","delta":"hi"}` + "\n\n",
+			truncated: true,
+		},
+		{
+			name:   "messages terminal (message_stop)",
+			shape:  sseShapeMessages,
+			stream: `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}` + "\n\n" + `data: {"type":"message_stop"}` + "\n\n",
+		},
+		{
+			// A Messages stream cut before message_delta/message_stop has no terminal
+			// signal, so it is a truncation and must fall back even with text buffered.
+			name:      "messages truncated",
+			shape:     sseShapeMessages,
+			stream:    `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}` + "\n\n",
+			truncated: true,
+		},
+		{
+			// [DONE] is not enough for Messages either: without message_delta/
+			// message_stop the reply has no stop_reason or final usage, so a stream
+			// that ends on [DONE] alone is still a truncation.
+			name:      "messages done without terminal event",
+			shape:     sseShapeMessages,
+			stream:    `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}` + "\n\n" + "data: [DONE]\n\n",
 			truncated: true,
 		},
 	}
