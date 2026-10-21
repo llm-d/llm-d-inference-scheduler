@@ -478,6 +478,46 @@ var _ = Describe("Chunked Decode", func() {
 			Expect(completionTokens).To(Equal(10))
 			Expect(totalTokens).To(Equal(15))
 		})
+
+		DescribeTable("reports a finish reason only on the last chunk",
+			func(maxTokens int, decodeResponses []string, wantFinishReasons []any) {
+				ti := newChunkedTestSetup(5, decodeResponses)
+				defer ti.stop()
+
+				resp := doPost(ti.addr, fmt.Sprintf(
+					`{"messages":[{"role":"user","content":"Hi"}],"max_tokens":%d,"stream":true}`, maxTokens))
+				Expect(resp.StatusCode).To(Equal(http.StatusOK))
+
+				var finishReasons []any
+				scanner := bufio.NewScanner(resp.Body)
+				for scanner.Scan() {
+					data, ok := strings.CutPrefix(scanner.Text(), reqcommon.SSEDataPrefix)
+					if !ok || scanner.Text() == reqcommon.SSEDone {
+						continue
+					}
+					var event map[string]any
+					Expect(json.Unmarshal([]byte(data), &event)).To(Succeed())
+					if choice := firstChoice(event); choice != nil {
+						Expect(choice).To(HaveKey(responseFieldFinishReason))
+						finishReasons = append(finishReasons, choice[responseFieldFinishReason])
+					}
+				}
+				Expect(scanner.Err()).ToNot(HaveOccurred())
+				Expect(finishReasons).To(Equal(wantFinishReasons))
+			},
+			Entry("decoder stops in a later chunk", 20, []string{
+				chatResponse("hello ", finishReasonLength, 5, 5),
+				chatResponse("world", "stop", 10, 3),
+			}, []any{nil, "stop"}),
+			Entry("token budget runs out", 10, []string{
+				chatResponse("hello ", finishReasonLength, 5, 5),
+				chatResponse("world", finishReasonLength, 10, 5),
+			}, []any{nil, finishReasonLength}),
+			Entry("chunk produces nothing to continue from", 20, []string{
+				chatResponse("hello ", finishReasonLength, 5, 5),
+				chatResponse("", finishReasonLength, 10, 0),
+			}, []any{nil, finishReasonLength}),
+		)
 	})
 
 	Describe("helper functions", func() {
