@@ -280,12 +280,13 @@ steps read and mutate. The load-bearing fields:
 `Host`, `Content-Length`, and `Content-Type` removed, normalized to lowercase. Steps use
 it as the base header set, then stamp the request ID and `x-llm-d-epp-profile`. The
 pipeline generates a coordinator-owned `x-llm-d-revision-decision-id` for every
-request. Client-provided values of the coordinator-owned headers are discarded, on the
-pipeline and on the passthrough: EPP routes on `x-llm-d-epp-profile`,
-`x-llm-d-revision-decision-id`, `x-llm-d-peer-topology`, and `x-llm-d-pin-host-port`
+request. Client-provided values of the coordinator-owned headers are discarded: EPP
+routes on `x-llm-d-epp-profile`, `x-llm-d-revision-decision-id`,
+`x-llm-d-peer-topology`, and `x-llm-d-pin-host-port`
 (see [endpoint-pin-screener](../pkg/epp/framework/plugins/requestcontrol/screener/endpointpin/README.md)),
 and answers `Prefer: if-available`, the `conditional-decode` step's signal, with 412 on
-any other leg.
+any other leg. The same headers are removed from the upstream response before it
+reaches the client. Both apply on the pipeline and on the passthrough.
 The pipeline can allowlist response headers with `forward_response_headers`;
 values returned by any response-producing step are stored on the request context
 for later requests. A fan-out step selects the most frequent value for each

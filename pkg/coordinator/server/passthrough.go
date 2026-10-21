@@ -43,8 +43,8 @@ import (
 // is reverse-proxied to the gateway with x-llm-d-epp-profile: decode, so EPP dispatches
 // it to a decode pod. Method, body, query, and forwarded headers are preserved;
 // X-Request-Id is validated and replaced with a UUID if malformed, and
-// coordinator-owned headers are stripped, matching handleInference's
-// sanitization.
+// coordinator-owned headers are stripped from the request and the response,
+// as on the registered paths.
 type passthroughHandler struct {
 	gatewayURL         *url.URL
 	transport          http.RoundTripper
@@ -121,6 +121,12 @@ func newPassthroughProxy(logger logr.Logger, gatewayURL *url.URL, transport http
 			pipeline.StripInternalHeaders(r.Header)
 			r.Header.Set(reqcommon.RequestIDHeaderKey, requestID)
 			r.Header.Set(reqcommon.EPPProfileHeaderKey, gateway.PhaseDecode)
+		},
+		// A plugin on the decode profile can stamp coordinator-owned headers on
+		// the response.
+		ModifyResponse: func(resp *http.Response) error {
+			pipeline.StripInternalHeaders(resp.Header)
+			return nil
 		},
 		FlushInterval: -1,
 		Transport:     transport,
