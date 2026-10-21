@@ -283,7 +283,7 @@ kubectl wait --for=jsonpath='{.subsets[0].addresses[0].ip}' \
 | `router.epp.tolerations` | Tolerations for EPP pods. | `[]` |
 | `router.epp.podSecurityContext` | Pod-level `securityContext` for EPP pods, inherited by the EPP, proxy sidecar, and sidecar-mode latency predictor containers. | `{}` |
 | `router.epp.securityContext` | Container-level `securityContext` for the EPP container. | `{}` |
-| `router.epp.resources` | EPP container resource requests and limits. | `requests.cpu: "8"`, `requests.memory: 8Gi`, `limits.memory: 16Gi` |
+| `router.epp.resources` | EPP container resource requests and limits. `limits.memory` also sets the EPP's `GOMEMLIMIT`, unless `router.epp.env` sets `GOMEMLIMIT`. | `requests.cpu: "8"`, `requests.memory: 8Gi`, `limits.memory: 16Gi` |
 | `router.epp.pluginsConfigFile` | EPP plugins configuration file name. | `default-plugins.yaml` |
 | `router.epp.pluginsConfig` | Structured EPP configuration rendered into `pluginsConfigFile`. | `{}` |
 | `router.epp.pluginsCustomConfig` | Additional raw ConfigMap entries keyed by file name. | `{}` |
