@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sort"
 	"sync"
 	"time"
 
@@ -34,20 +33,20 @@ import (
 // are placeholders until measured on the target GPUs.
 type Weights struct {
 	// CopyCost is a CPU-to-GPU copy (adapter in the CPU cache only).
-	CopyCost float64
+	CopyCost float64 `json:"copyCost"`
 	// LoadCost is a load from storage (adapter in neither tier).
-	LoadCost float64
+	LoadCost float64 `json:"loadCost"`
 	// BlockedCost is charged when every GPU slot is running or reported
 	// active, so vLLM would skip the request until a slot drains.
-	BlockedCost float64
+	BlockedCost float64 `json:"blockedCost"`
 	// PendingCost replaces the tier cost when an earlier request for the
 	// adapter is already loading on the pod: the request waits for that load
 	// rather than paying for its own.
-	PendingCost float64
+	PendingCost float64 `json:"pendingCost"`
 	// EvictionWeight scales the cost of the evictions an admission causes:
 	// each victim's demand share times the cost of bringing it back, a copy
 	// for a GPU adapter demoted to CPU and a load for one dropped to storage.
-	EvictionWeight float64
+	EvictionWeight float64 `json:"evictionWeight"`
 }
 
 // DefaultWeights returns the starting weights.
@@ -73,11 +72,12 @@ func (w Weights) Validate() error {
 // normalized over the candidates' costs: the cheapest pod scores 1, the
 // costliest 0, and equal costs score every pod 1 so they do not discriminate.
 // A base-model request scores every pod 1, leaving the choice to other scorers.
+// A candidate with no entry in est has no estimate and admits as Absent.
 //
 // isBase marks a base-model request. It must come from configuration (the
 // pool's base model names), not from the adapter being absent from metrics,
 // which is indistinguishable from a cold adapter.
-func Score(m *residency.Model, d *Demand, adapter string, isBase bool, pods []string, w Weights, now time.Time) map[string]float64 {
+func Score(est map[string]*residency.Pod, d *Demand, adapter string, isBase bool, pods []string, w Weights, now time.Time) map[string]float64 {
 	scores := make(map[string]float64, len(pods))
 	if isBase {
 		for _, p := range pods {
@@ -85,10 +85,23 @@ func Score(m *residency.Model, d *Demand, adapter string, isBase bool, pods []st
 		}
 		return scores
 	}
+	admissions := make(map[string]residency.Admission, len(pods))
+	var victims []string
+	for _, p := range pods {
+		a := residency.Admission{Tier: residency.Absent}
+		if e := est[p]; e != nil {
+			a = e.Admit(adapter)
+		}
+		admissions[p] = a
+		victims = append(victims, a.GPUVictim, a.CPUVictim)
+	}
+	// One read of every victim's share, so that pods evicting the same adapter
+	// are charged exactly the same amount.
+	shares := d.Shares(victims, now)
 	costs := make(map[string]float64, len(pods))
 	minCost, maxCost := math.Inf(1), 0.0
 	for _, p := range pods {
-		c := cost(m.Admit(p, adapter), d, w, now)
+		c := cost(admissions[p], shares, w)
 		costs[p] = c
 		minCost = math.Min(minCost, c)
 		maxCost = math.Max(maxCost, c)
@@ -103,7 +116,7 @@ func Score(m *residency.Model, d *Demand, adapter string, isBase bool, pods []st
 	return scores
 }
 
-func cost(a residency.Admission, d *Demand, w Weights, now time.Time) float64 {
+func cost(a residency.Admission, shares map[string]float64, w Weights) float64 {
 	c := 0.0
 	switch {
 	case a.Pending:
@@ -117,42 +130,34 @@ func cost(a residency.Admission, d *Demand, w Weights, now time.Time) float64 {
 		c += w.BlockedCost
 	}
 	if a.GPUVictim != "" {
-		c += w.EvictionWeight * d.Share(a.GPUVictim, now) * w.CopyCost
+		c += w.EvictionWeight * shares[a.GPUVictim] * w.CopyCost
 	}
 	if a.CPUVictim != "" {
-		c += w.EvictionWeight * d.Share(a.CPUVictim, now) * w.LoadCost
+		c += w.EvictionWeight * shares[a.CPUVictim] * w.LoadCost
 	}
 	return c
 }
 
+// maxAdapters bounds the adapters Demand tracks. Target model names come from
+// clients, so without a bound the estimator grows with every name sent.
+const maxAdapters = 1024
+
 // pruneBelow is the decayed rate, in requests per second, below which an
-// adapter is forgotten. Its share of any total is then negligible, and
-// forgetting it keeps the estimator from growing with every target model name
-// a client sends.
+// adapter is forgotten. Its share of any total is then negligible.
 const pruneBelow = 1e-6
 
-// minPruneSize is the fewest observations between sweeps for decayed adapters.
-const minPruneSize = 64
+type demand struct {
+	rate float64
+	last time.Time
+}
 
 // Demand estimates each adapter's request rate as an exponentially decaying
 // count, in requests per second. It is safe for concurrent use.
 type Demand struct {
-	mu   sync.Mutex
-	tau  float64 // decay time constant in seconds
-	rate map[string]float64
-	last map[string]time.Time
-	// total is the sum of every adapter's rate as of totalAt. All rates decay
-	// alike, so Share reads it in O(1) instead of summing over client-chosen
-	// names.
-	total   float64
-	totalAt time.Time
-	// sinceSweep counts observations since the last sweep. A sweep runs once
-	// it reaches nextSweep, the number of adapters the previous sweep kept (at
-	// least minPruneSize), so sweeps cost O(log n) amortized. The threshold is
-	// fixed at the sweep: compared with the live map size, it would never be
-	// reached while every observation adds a new name.
-	sinceSweep int
-	nextSweep  int
+	mu      sync.Mutex
+	tau     float64 // decay time constant in seconds
+	limit   int
+	adapter map[string]*demand
 }
 
 // NewDemand returns an estimator whose estimate halves every halfLife, which
@@ -161,102 +166,95 @@ func NewDemand(halfLife time.Duration) (*Demand, error) {
 	if halfLife <= 0 {
 		return nil, errors.New("lorascore: demand half-life must be positive")
 	}
-	return &Demand{
-		tau:  halfLife.Seconds() / math.Ln2,
-		rate: map[string]float64{},
-		last: map[string]time.Time{},
-	}, nil
+	return &Demand{tau: halfLife.Seconds() / math.Ln2, limit: maxAdapters, adapter: map[string]*demand{}}, nil
 }
 
-// Observe records one request for adapter at time t.
+// Observe records one request for adapter at time t. When the estimator is
+// full, a new adapter first drops every adapter decayed below pruneBelow and,
+// if none has, the one with the lowest rate.
 func (d *Demand) Observe(adapter string, t time.Time) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if t.After(d.totalAt) {
-		d.total = d.decayedTotal(t)
-		d.totalAt = t
+	e, ok := d.adapter[adapter]
+	if !ok {
+		if len(d.adapter) >= d.limit {
+			d.evict(t)
+		}
+		e = &demand{last: t}
+		d.adapter[adapter] = e
 	}
-	before := d.decayed(adapter, d.totalAt)
-	d.rate[adapter] = d.decayed(adapter, t) + 1/d.tau
-	if t.After(d.last[adapter]) {
-		d.last[adapter] = t
-	}
-	d.total += d.decayed(adapter, d.totalAt) - before
-	if d.sinceSweep++; d.sinceSweep >= max(d.nextSweep, minPruneSize) {
-		d.prune(t)
+	e.rate = d.decayed(e, t) + 1/d.tau
+	if t.After(e.last) {
+		e.last = t
 	}
 }
 
-// prune forgets adapters whose rate at time t has decayed below pruneBelow,
-// then recomputes the total. Callers hold d.mu.
-func (d *Demand) prune(t time.Time) {
-	for a := range d.rate {
-		if d.decayed(a, t) < pruneBelow {
-			delete(d.rate, a)
-			delete(d.last, a)
+// evict makes room for one adapter. Callers hold d.mu.
+func (d *Demand) evict(t time.Time) {
+	lowest, lowestRate := "", math.Inf(1)
+	for a, e := range d.adapter {
+		r := d.decayed(e, t)
+		if r < pruneBelow {
+			delete(d.adapter, a)
+			continue
+		}
+		if r < lowestRate || (r == lowestRate && a < lowest) {
+			lowest, lowestRate = a, r
 		}
 	}
-	d.retotal(d.totalAt)
-	d.sinceSweep, d.nextSweep = 0, len(d.rate)
-}
-
-// retotal recomputes the total as of t from the per-adapter rates, in sorted
-// order so that the result does not depend on map iteration order. It also
-// clears the rounding error that incremental updates accumulate. Callers hold
-// d.mu.
-func (d *Demand) retotal(t time.Time) {
-	names := make([]string, 0, len(d.rate))
-	for a := range d.rate {
-		names = append(names, a)
+	if len(d.adapter) >= d.limit {
+		delete(d.adapter, lowest)
 	}
-	sort.Strings(names)
-	total := 0.0
-	for _, a := range names {
-		total += d.decayed(a, t)
-	}
-	d.total, d.totalAt = total, t
-}
-
-// decayedTotal returns the total decayed from totalAt to t. Callers hold d.mu.
-func (d *Demand) decayedTotal(t time.Time) float64 {
-	dt := t.Sub(d.totalAt).Seconds()
-	if dt <= 0 {
-		return d.total
-	}
-	return d.total * math.Exp(-dt/d.tau)
 }
 
 // Rate returns adapter's estimated request rate at time t.
 func (d *Demand) Rate(adapter string, t time.Time) float64 {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.decayed(adapter, t)
+	return d.decayed(d.adapter[adapter], t)
 }
 
 // Share returns adapter's fraction of the total estimated rate at time t, or 0
 // when nothing has been observed.
 func (d *Demand) Share(adapter string, t time.Time) float64 {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	// Every adapter was last observed no later than totalAt, so the total is
-	// known for any t at or after it. An earlier t, from a caller that read the
-	// clock before a concurrent Observe, is read at totalAt instead, so that
-	// the numerator and the total are taken at the same time and the shares
-	// still sum to 1.
-	if t.Before(d.totalAt) {
-		t = d.totalAt
-	}
-	total := d.decayedTotal(t)
-	if total <= 0 {
-		return 0
-	}
-	return min(d.decayed(adapter, t)/total, 1)
+	return d.Shares([]string{adapter}, t)[adapter]
 }
 
-func (d *Demand) decayed(adapter string, t time.Time) float64 {
-	dt := t.Sub(d.last[adapter]).Seconds()
-	if dt <= 0 {
-		return d.rate[adapter]
+// Shares returns each named adapter's Share at time t, all against one total.
+// Empty names are skipped. Summing the total also forgets decayed adapters.
+func (d *Demand) Shares(adapters []string, t time.Time) map[string]float64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	total := 0.0
+	for a, e := range d.adapter {
+		r := d.decayed(e, t)
+		if r < pruneBelow {
+			delete(d.adapter, a)
+			continue
+		}
+		total += r
 	}
-	return d.rate[adapter] * math.Exp(-dt/d.tau)
+	out := make(map[string]float64, len(adapters))
+	for _, a := range adapters {
+		if a == "" {
+			continue
+		}
+		if total > 0 {
+			out[a] = min(d.decayed(d.adapter[a], t)/total, 1)
+		} else {
+			out[a] = 0
+		}
+	}
+	return out
+}
+
+func (d *Demand) decayed(e *demand, t time.Time) float64 {
+	if e == nil {
+		return 0
+	}
+	dt := t.Sub(e.last).Seconds()
+	if dt <= 0 {
+		return e.rate
+	}
+	return e.rate * math.Exp(-dt/d.tau)
 }

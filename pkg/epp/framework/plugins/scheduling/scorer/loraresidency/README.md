@@ -16,31 +16,41 @@ The plugin keeps one recency order per pod, built from evidence that an adapter 
 
 The `max_lora` label of `vllm:lora_requests_info`, scraped as `MaxActiveModels`, sets each pod's GPU slots. Adapters reported active in `ActiveModels` (running or queued) are never chosen as GPU victims, and they count toward a pod being blocked. They do not make an adapter resident, because a queued adapter need not be loaded.
 
-Endpoint lifecycle events keep the estimate per endpoint object. A deleted or replaced pod starts empty, and callbacks for requests scheduled on an older object are ignored.
+Endpoint lifecycle events keep the estimate per endpoint object. A deleted or replaced pod starts empty, and callbacks for requests on it are dropped.
 
 ### Scoring formula
 
 Per candidate pod, in units of one load from storage:
 
 ```text
+cost = 0                                             if the adapter is on GPU
 cost = tierCost
      + blockedCost                                   if every GPU slot is running or reported active
      + evictionWeight * (share(gpuVictim) * copyCost + share(cpuVictim) * loadCost)
+                                                     otherwise
 ```
 
-- **`tierCost`**: `0` on GPU, `pendingCost` if an earlier request for the adapter is routed to the pod but has not started, `copyCost` if only in the CPU cache, `loadCost` if in neither tier.
+- **`tierCost`**: `pendingCost` if an earlier request for the adapter is routed to the pod but has not started, `copyCost` if only in the CPU cache, `loadCost` if in neither tier.
 - **Victims** follow vLLM's load order. An absent adapter is first loaded into the CPU cache, dropping its oldest idle entry to storage when the cache is full (`cpuVictim`). It is then activated, demoting the oldest idle GPU adapter to the CPU cache when no slot is free (`gpuVictim`). With `max_cpu_loras == max_loras` the two coincide and the victim costs a load.
-- **`share(a)`** is adapter `a`'s fraction of the total estimated request rate, an exponentially decaying count with half-life `demandHalfLife`.
+- **`share(a)`** is adapter `a`'s fraction of the total estimated request rate, an exponentially decaying count with half-life `demandHalfLife`. At most 1024 adapters are tracked; past that, a new adapter replaces the one with the lowest rate.
 - No eviction is charged when the request is pending, because the earlier request already caused it.
 
-Scores are min-max normalized over the candidates: the cheapest pod scores `1.0`, the costliest `0.0`, and equal costs score every pod `1.0`. A request whose target model is listed in `baseModels` scores every pod `1.0`, leaving the choice to the other scorers.
+Scores are min-max normalized over the candidates: the cheapest pod scores `1.0`, the costliest `0.0`, and equal costs score every pod `1.0`. A request whose target model is listed in `baseModels`, or is empty, scores every pod `1.0`, leaving the choice to the other scorers.
+
+## Choosing a LoRA scorer
+
+`lora-affinity-scorer` reads only the scraped `running_lora_adapters` and `waiting_lora_adapters` labels and keeps no state. Use it when adapters fit in the pods' GPU slots, or when traffic reaches the pods through more than this EPP.
+
+`lora-residency-scorer` keeps an estimate of each pod's GPU and CPU-cache adapters from the requests it routes, and prices the evictions a placement causes by demand. Use it when there are more adapters than GPU slots, so that misses and evictions decide latency, and the EPP routes all traffic to the pods. Configure one of the two, not both.
 
 ## Inputs consumed
 
 - `metrics.ActiveModelsKey` (`map[string]int`)
 - endpoint metric `MaxActiveModels`
 
-The plugin also implements PreRequest, ResponseHeader and ResponseBody, and registers an endpoint-lifecycle extractor. The runner wires a configured plugin into each of these, so declaring it once as a scorer is enough.
+The plugin also implements PreRequest, ResponseHeader and ResponseBody, and registers an endpoint-lifecycle extractor. The runner wires a configured plugin into each of these, so declaring it once as a scorer is enough. If the configuration declares no endpoint-notification data source, the extractor registration adds one.
+
+Only one instance can be configured.
 
 ## Configuration
 
@@ -77,8 +87,7 @@ The plugin is alpha and needs `--allow-experimental-plugins`.
 
 ## Operational notes
 
-- The estimate covers only traffic this EPP routes. Requests sent to the pods another way, and adapters loaded through the vLLM API without a request, are not seen.
-- With more than one EPP replica, only the leader routes, so the estimate is that replica's. A newly elected leader starts empty.
+- The estimate is never reconciled with what the pods hold. It covers only traffic this EPP routes: requests sent to the pods another way, adapters loaded through the vLLM API without a request, and evictions vLLM makes on its own are not seen, and the error they cause does not decay. An EPP restart, or a newly elected leader when there is more than one replica, starts empty.
 - Until a pod reports `max_lora`, it is treated as having one GPU slot. vLLM publishes the gauge only after a step, so an idle pod reports no value (see llm-d/llm-d-router#3361).
 - The scorer does not consider pod load. A hot adapter stays on its pod even when that pod is overloaded, and queue-depth scorers may not see it either, because vLLM grows its batches rather than queueing requests. Pair it with `running-requests-size-scorer` if that matters.
 - The default costs were not tuned. On H100 with vLLM v0.31.0, a CPU-to-GPU copy measured 0.03 to 0.24 of a load from storage, falling with rank.

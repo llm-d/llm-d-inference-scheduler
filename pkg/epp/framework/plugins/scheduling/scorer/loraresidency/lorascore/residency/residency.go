@@ -26,9 +26,8 @@ limitations under the License.
 // loaded from storage.
 //
 // The router does not see engine steps, so recency comes from evidence that an
-// adapter executed: a request that started producing output, a finished
-// request that had started, or a source that reports running adapters. A
-// request that is only routed is pending and changes nothing, because vLLM
+// adapter executed: a request that started producing output, or a finished
+// request that had started. A request that is only routed is pending and changes nothing, because vLLM
 // schedules running requests first and skips a waiting request whose adapter
 // would exceed max_loras. An executing adapter ranks above every idle one,
 // since vLLM touches it each step.
@@ -36,7 +35,6 @@ package residency
 
 import (
 	"sort"
-	"sync"
 	"time"
 )
 
@@ -89,8 +87,7 @@ type entry struct {
 	running int
 }
 
-// Pod is the estimate for one pod. It is not safe for concurrent use; Model
-// serializes access.
+// Pod is the estimate for one pod. It is not safe for concurrent use.
 type Pod struct {
 	gpu, cpu int
 	entries  map[string]*entry
@@ -98,8 +95,6 @@ type Pod struct {
 	// active is the latest running-or-queued snapshot (llm-d ActiveModels):
 	// it protects GPU adapters from eviction but is not evidence of execution.
 	active map[string]bool
-	// reported is the latest truly-running snapshot.
-	reported map[string]bool
 }
 
 // NewPod returns an empty estimate with the given GPU slots (max_loras) and CPU
@@ -107,10 +102,9 @@ type Pod struct {
 // vLLM requires max_cpu_loras >= max_loras.
 func NewPod(gpuSlots, cpuSlots int) *Pod {
 	p := &Pod{
-		entries:  map[string]*entry{},
-		pending:  map[string]int{},
-		active:   map[string]bool{},
-		reported: map[string]bool{},
+		entries: map[string]*entry{},
+		pending: map[string]int{},
+		active:  map[string]bool{},
 	}
 	p.SetCapacity(gpuSlots, cpuSlots)
 	return p
@@ -153,18 +147,6 @@ func (p *Pod) Finished(adapter string, t time.Time, started bool) {
 	e := p.touch(adapter, t)
 	if e.running > 0 {
 		e.running--
-	}
-	p.prune()
-}
-
-// ObserveRunning replaces the snapshot of adapters the pod reports running at
-// time t, which covers traffic this router did not route. Use it only for a
-// source that separates running from queued.
-func (p *Pod) ObserveRunning(adapters []string, t time.Time) {
-	p.reported = make(map[string]bool, len(adapters))
-	for _, a := range adapters {
-		p.reported[a] = true
-		p.touch(a, t)
 	}
 	p.prune()
 }
@@ -260,7 +242,7 @@ func (p *Pod) oldestEvictable(order []string, n int) int {
 
 func (p *Pod) executing(adapter string) bool {
 	e := p.entries[adapter]
-	return (e != nil && e.running > 0) || p.reported[adapter]
+	return e != nil && e.running > 0
 }
 
 func (p *Pod) unpend(adapter string) {
@@ -304,108 +286,4 @@ func (p *Pod) prune() {
 			delete(p.entries, a)
 		}
 	}
-}
-
-// Model holds one estimate per pod and is safe for concurrent use.
-type Model struct {
-	mu       sync.Mutex
-	cpuSlots int
-	pods     map[string]*Pod
-}
-
-// NewModel returns a model whose pods use cpuSlots as max_cpu_loras; 0 means
-// vLLM's default of max_cpu_loras = max_loras. GPU slots default to 1 until
-// ObserveCapacity reports the pod's max_loras.
-func NewModel(cpuSlots int) *Model {
-	return &Model{cpuSlots: cpuSlots, pods: map[string]*Pod{}}
-}
-
-func (m *Model) pod(id string) *Pod {
-	p, ok := m.pods[id]
-	if !ok {
-		p = NewPod(1, m.cpuSlots)
-		m.pods[id] = p
-	}
-	return p
-}
-
-// ObserveCapacity sets a pod's GPU slots from its reported max_loras. A value of
-// 0 or less means unreported and is ignored.
-func (m *Model) ObserveCapacity(id string, gpuSlots int) {
-	if gpuSlots <= 0 {
-		return
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.pod(id).SetCapacity(gpuSlots, m.cpuSlots)
-}
-
-// Routed records a request for adapter sent to pod id.
-func (m *Model) Routed(id, adapter string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.pod(id).Routed(adapter)
-}
-
-// Started records that a request for adapter began executing on pod id at t.
-func (m *Model) Started(id, adapter string, t time.Time) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.pod(id).Started(adapter, t)
-}
-
-// Finished records the end of a request for adapter on pod id at t.
-func (m *Model) Finished(id, adapter string, t time.Time, started bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.pod(id).Finished(adapter, t, started)
-}
-
-// ObserveRunning replaces pod id's truly-running snapshot, observed at t.
-func (m *Model) ObserveRunning(id string, adapters []string, t time.Time) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.pod(id).ObserveRunning(adapters, t)
-}
-
-// ObserveActive replaces pod id's running-or-queued snapshot.
-func (m *Model) ObserveActive(id string, adapters []string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.pod(id).ObserveActive(adapters)
-}
-
-// Tier returns where adapter is estimated to live on pod id.
-func (m *Model) Tier(id, adapter string) Tier {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if p, ok := m.pods[id]; ok {
-		return p.Tier(adapter)
-	}
-	return Absent
-}
-
-// Admit estimates the effect of serving a request for adapter on pod id now.
-func (m *Model) Admit(id, adapter string) Admission {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if p, ok := m.pods[id]; ok {
-		return p.Admit(adapter)
-	}
-	return Admission{Tier: Absent}
-}
-
-// Has reports whether the model holds an estimate for pod id.
-func (m *Model) Has(id string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	_, ok := m.pods[id]
-	return ok
-}
-
-// Delete forgets pod id, e.g. when its endpoint is removed.
-func (m *Model) Delete(id string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.pods, id)
 }

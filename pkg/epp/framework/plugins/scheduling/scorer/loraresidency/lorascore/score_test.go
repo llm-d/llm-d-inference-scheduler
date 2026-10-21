@@ -57,76 +57,82 @@ func TestDemandForgetsDecayedAdapters(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		d.Observe(fmt.Sprintf("stale-%d", i), at(0))
 	}
-	for i := 0; i < 1000; i++ { // 1 req/s for 1000 s, 100 half-lives later
-		d.Observe("live", at(float64(1000+i)))
-	}
-	if got := len(d.rate) + len(d.last); got > 2*minPruneSize {
-		t.Fatalf("tracking %d entries after the stale adapters decayed, want at most %d", got, 2*minPruneSize)
-	}
-	if s := d.Share("live", at(1999)); !near(s, 1) {
+	d.Observe("live", at(1000)) // 100 half-lives later
+	if s := d.Share("live", at(1000)); !near(s, 1) {
 		t.Fatalf("Share(live) = %v, want 1", s)
 	}
-}
-
-// A client can send a new name with every request. Sweeps must keep running
-// while the map grows, or no name is ever forgotten.
-func TestDemandForgetsContinuouslyUniqueNames(t *testing.T) {
-	d := mustDemand(t, time.Second) // a name is forgotten ~20 s after its request
-	for i := 0; i < 10000; i++ {    // 10 new names/s for 1000 s
-		d.Observe(fmt.Sprintf("name-%d", i), at(float64(i)*0.1))
-	}
-	if got := len(d.rate); got > 1000 || len(d.last) != got {
-		t.Fatalf("tracking %d rates and %d times after 10000 unique names, want at most 1000 each", got, len(d.last))
+	if got := len(d.adapter); got != 1 {
+		t.Fatalf("tracking %d adapters after the stale ones decayed, want 1", got)
 	}
 }
 
-// The running total must match the sum of the per-adapter estimates, including
-// across sweeps and for observations that arrive out of time order.
-func TestShareMatchesSumOfRates(t *testing.T) {
-	d := mustDemand(t, 10*time.Second)
-	for i := 0; i < 3000; i++ {
-		ts := float64(i) * 0.1
-		if i%7 == 0 {
-			ts -= 0.35 // a late observation, as concurrent callers can produce
-		}
-		d.Observe(fmt.Sprintf("a%d", i%(1+i/40)), at(ts))
+// A client can send a new name with every request faster than names decay.
+// The estimator stays at its bound, and its shares stay those of the summed
+// rates.
+func TestDemandBoundedUnderUniqueNames(t *testing.T) {
+	d := mustDemand(t, time.Hour) // nothing decays away during the test
+	d.limit = 64
+	for i := 0; i < 10000; i++ {
+		d.Observe(fmt.Sprintf("name-%d", i), at(float64(i)*1e-3))
 	}
-	now := at(300)
+	if got := len(d.adapter); got > d.limit {
+		t.Fatalf("tracking %d adapters, want at most %d", got, d.limit)
+	}
+	now := at(10)
 	sum := 0.0
-	for a := range d.rate {
+	for a := range d.adapter {
 		sum += d.Rate(a, now)
 	}
-	for _, a := range []string{"a0", "a3", "a70"} {
-		if got, want := d.Share(a, now), d.Rate(a, now)/sum; math.Abs(got-want) > 1e-9*want {
+	for _, a := range []string{"name-9999", "name-9990"} {
+		if got, want := d.Share(a, now), d.Rate(a, now)/sum; want == 0 || math.Abs(got-want) > 1e-9*want {
 			t.Fatalf("Share(%s) = %v, want %v", a, got, want)
 		}
 	}
 }
 
-// Score reads the clock before taking the lock, so a concurrent Observe can
-// move the total past the time Share is asked about. Shares must still be
-// taken at one time and sum to 1, not each come out near 1.
-func TestShareBeforeLatestObservation(t *testing.T) {
-	d := mustDemand(t, 10*time.Second)
-	d.Observe("a", at(0))
-	d.Observe("b", at(100))
-	if sum := d.Share("a", at(0)) + d.Share("b", at(0)); !near(sum, 1) {
-		t.Fatalf("Share(a)+Share(b) at t=0 = %v, want 1", sum)
+// Past the bound, a new adapter displaces the least requested one.
+func TestDemandFullDropsLowestRate(t *testing.T) {
+	d := mustDemand(t, time.Minute)
+	d.limit = 3
+	for i := 0; i < 5; i++ {
+		d.Observe("hot", at(0))
 	}
-	if got, want := d.Share("a", at(0)), d.Share("a", at(100)); got != want {
-		t.Fatalf("Share(a) at t=0 = %v, want %v, its value at the latest observation", got, want)
+	d.Observe("warm", at(0))
+	d.Observe("warm", at(0))
+	d.Observe("cold", at(0))
+	d.Observe("new", at(1))
+	if _, ok := d.adapter["cold"]; ok {
+		t.Fatalf("cold kept past the bound: %v", d.adapter)
+	}
+	for _, a := range []string{"hot", "warm", "new"} {
+		if _, ok := d.adapter[a]; !ok {
+			t.Fatalf("%s dropped, want only cold dropped", a)
+		}
 	}
 }
 
-// Target model names come from clients, so Share must not cost time in the
-// number of names tracked.
-func TestShareCostIsIndependentOfTrackedNames(t *testing.T) {
-	d := mustDemand(t, time.Hour) // nothing decays away during the test
-	for i := 0; i < 100000; i++ {
-		d.Observe(fmt.Sprintf("name-%d", i), at(0))
+// Shares read before the latest observation, as a caller that read the clock
+// before a concurrent Observe does, still sum to 1.
+func TestSharesBeforeLatestObservationSumToOne(t *testing.T) {
+	d := mustDemand(t, 10*time.Second)
+	d.Observe("a", at(0))
+	d.Observe("b", at(100))
+	sh := d.Shares([]string{"a", "b"}, at(0))
+	if sum := sh["a"] + sh["b"]; !near(sum, 1) {
+		t.Fatalf("Share(a)+Share(b) at t=0 = %v, want 1", sum)
 	}
-	if n := testing.AllocsPerRun(10, func() { d.Share("name-1", at(1)) }); n != 0 {
-		t.Fatalf("Share allocates %v times per call, want 0", n)
+}
+
+// A late observation counts as one request at the adapter's latest time.
+func TestDemandLateObservationDoesNotInflate(t *testing.T) {
+	d := mustDemand(t, 10*time.Second)
+	d.Observe("a", at(10))
+	d.Observe("a", at(0))
+	want := mustDemand(t, 10*time.Second)
+	want.Observe("a", at(10))
+	want.Observe("a", at(10))
+	if got, w := d.Rate("a", at(10)), want.Rate("a", at(10)); !near(got, w) {
+		t.Fatalf("Rate after a late observation = %v, want %v", got, w)
 	}
 }
 
@@ -143,19 +149,21 @@ func TestDemandShare(t *testing.T) {
 	}
 }
 
-func setup(t *testing.T) (*residency.Model, *Demand) {
-	m := residency.NewModel(3)
+type estimate = map[string]*residency.Pod
+
+func setup(t *testing.T) (estimate, *Demand) {
+	m := estimate{}
 	for _, p := range []string{"p0", "p1", "p2"} {
-		m.ObserveCapacity(p, 1)
+		m[p] = residency.NewPod(1, 3)
 	}
 	return m, mustDemand(t, time.Minute)
 }
 
-func serve(m *residency.Model, d *Demand, pod, adapter string, s float64) {
-	m.Routed(pod, adapter)
+func serve(m estimate, d *Demand, pod, adapter string, s float64) {
+	m[pod].Routed(adapter)
 	d.Observe(adapter, at(s))
-	m.Started(pod, adapter, at(s))
-	m.Finished(pod, adapter, at(s), true)
+	m[pod].Started(adapter, at(s))
+	m[pod].Finished(adapter, at(s), true)
 }
 
 func TestGPUBeatsCPUBeatsAbsent(t *testing.T) {
@@ -198,8 +206,8 @@ func TestEvictionWeightZeroIgnoresVictim(t *testing.T) {
 
 func TestBlockedPodPenalized(t *testing.T) {
 	m, d := setup(t)
-	m.Routed("p0", "busy")
-	m.Started("p0", "busy", at(1)) // p0's only slot is running
+	m["p0"].Routed("busy")
+	m["p0"].Started("busy", at(1)) // p0's only slot is running
 	d.Observe("busy", at(1))
 	s := Score(m, d, "new", false, []string{"p0", "p1"}, DefaultWeights(), at(2))
 	if !(s["p1"] > s["p0"]) {
@@ -210,8 +218,8 @@ func TestBlockedPodPenalized(t *testing.T) {
 func TestBaseModelRequestIsNeutral(t *testing.T) {
 	m, d := setup(t)
 	serve(m, d, "p0", "a", 1)
-	m.Routed("p1", "busy")
-	m.Started("p1", "busy", at(1))
+	m["p1"].Routed("busy")
+	m["p1"].Started("busy", at(1))
 	s := Score(m, d, "base", true, []string{"p0", "p1", "p2"}, DefaultWeights(), at(2))
 	for _, p := range []string{"p1", "p2"} {
 		if s[p] != s["p0"] {
@@ -282,37 +290,35 @@ func TestShareBeforeAnyRequestIsZero(t *testing.T) {
 // admission drops the GPU victim out of the CPU cache too, so bringing it back
 // is a load, not a copy.
 func TestDefaultConfigVictimPricedAsLoad(t *testing.T) {
-	m := residency.NewModel(0)
-	m.ObserveCapacity("p0", 1)
+	m := estimate{"p0": residency.NewPod(1, 0)}
 	d := mustDemand(t, time.Minute)
 	serve(m, d, "p0", "hot", 1)
 	serve(m, d, "p0", "other", 1) // other evicts hot; give hot a known share
 	serve(m, d, "p0", "hot", 2)
-	adm := m.Admit("p0", "new")
+	adm := m["p0"].Admit("new")
 	if adm.CPUVictim != "hot" || adm.GPUVictim != "" {
 		t.Fatalf("Admit(new) = %+v, want CPUVictim hot and no GPUVictim", adm)
 	}
 	w := DefaultWeights()
 	share := d.Share("hot", at(3))
-	if got, want := cost(adm, d, w, at(3)), w.LoadCost+share*w.LoadCost; !near(got, want) {
+	if got, want := cost(adm, d.Shares([]string{adm.GPUVictim, adm.CPUVictim}, at(3)), w), w.LoadCost+share*w.LoadCost; !near(got, want) {
 		t.Fatalf("cost = %v, want LoadCost + share*LoadCost = %v", got, want)
 	}
 }
 
 // With a larger CPU cache, an absent admission prices both victims.
 func TestBothVictimsPriced(t *testing.T) {
-	m := residency.NewModel(2)
-	m.ObserveCapacity("p0", 1)
+	m := estimate{"p0": residency.NewPod(1, 2)}
 	d := mustDemand(t, time.Minute)
 	serve(m, d, "p0", "a", 1)
 	serve(m, d, "p0", "b", 2) // GPU = {b}, CPU = {b, a}
-	adm := m.Admit("p0", "new")
+	adm := m["p0"].Admit("new")
 	if adm.GPUVictim != "b" || adm.CPUVictim != "a" {
 		t.Fatalf("Admit(new) = %+v, want GPUVictim b, CPUVictim a", adm)
 	}
 	w := DefaultWeights()
 	want := w.LoadCost + d.Share("b", at(3))*w.CopyCost + d.Share("a", at(3))*w.LoadCost
-	if got := cost(adm, d, w, at(3)); !near(got, want) {
+	if got := cost(adm, d.Shares([]string{adm.GPUVictim, adm.CPUVictim}, at(3)), w); !near(got, want) {
 		t.Fatalf("cost = %v, want %v", got, want)
 	}
 }
@@ -322,8 +328,8 @@ func TestBothVictimsPriced(t *testing.T) {
 // so with PendingCost equal to LoadCost the pending pod gains nothing.
 func TestPendingRequestDoesNotLookResident(t *testing.T) {
 	m, d := setup(t)
-	m.Routed("p0", "a")
-	if got := m.Tier("p0", "a"); got != residency.Absent {
+	m["p0"].Routed("a")
+	if got := m["p0"].Tier("a"); got != residency.Absent {
 		t.Fatalf("Tier(p0, a) = %v, want Absent while only pending", got)
 	}
 	w := DefaultWeights()
@@ -377,14 +383,14 @@ func TestWeightsValidate(t *testing.T) {
 // scatter across pods.
 func TestBurstForColdAdapterFollowsPendingPod(t *testing.T) {
 	m, d := setup(t)
-	m.Routed("p0", "cold")
+	m["p0"].Routed("cold")
 	d.Observe("cold", at(1))
 	for i := 0; i < 3; i++ {
 		s := Score(m, d, "cold", false, []string{"p0", "p1", "p2"}, DefaultWeights(), at(1))
 		if !(s["p0"] > s["p1"] && s["p0"] > s["p2"]) {
 			t.Fatalf("request %d: want p0 (already loading cold) preferred, got %v", i, s)
 		}
-		m.Routed("p0", "cold")
+		m["p0"].Routed("cold")
 	}
 }
 
@@ -392,28 +398,9 @@ func TestBurstForColdAdapterFollowsPendingPod(t *testing.T) {
 func TestGPUBeatsPending(t *testing.T) {
 	m, d := setup(t)
 	serve(m, d, "p0", "a", 1)
-	m.Routed("p1", "a")
+	m["p1"].Routed("a")
 	s := Score(m, d, "a", false, []string{"p0", "p1"}, DefaultWeights(), at(2))
 	if !(s["p0"] > s["p1"]) {
 		t.Fatalf("want GPU p0 over pending p1, got %v", s)
-	}
-}
-
-// Share must not depend on map iteration order. Rates spanning more than 2^53
-// make the floating-point total order-sensitive, so a map-ordered sum would
-// differ between calls; the running total is never summed in map order.
-func TestShareIsIndependentOfMapOrder(t *testing.T) {
-	d := mustDemand(t, time.Second)
-	t0 := time.Unix(0, 0)
-	d.rate["big"], d.last["big"] = 1e17, t0
-	for _, a := range []string{"s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"} {
-		d.rate[a], d.last[a] = 7, t0
-	}
-	d.retotal(t0)
-	first := d.Share("s1", t0)
-	for i := 0; i < 500; i++ {
-		if got := d.Share("s1", t0); math.Float64bits(got) != math.Float64bits(first) {
-			t.Fatalf("call %d: Share = %v, first call gave %v", i, got, first)
-		}
 	}
 }

@@ -157,27 +157,10 @@ func TestStaleTouchDoesNotRewindRecency(t *testing.T) {
 	p := NewPod(1, 3)
 	served(p, "a", 5)
 	served(p, "b", 4)
-	p.ObserveRunning([]string{"a"}, at(3))
-	p.ObserveRunning(nil, at(3))
+	running(p, "a", 3)
+	p.Finished("a", at(3), true)
 	if got := p.Tier("a"); got != GPU {
 		t.Fatalf("Tier(a) = %v, want GPU (last use 5 beats b's 4)", got)
-	}
-}
-
-func TestObserveRunningTouchesAndPins(t *testing.T) {
-	p := NewPod(1, 3)
-	served(p, "a", 1)
-	served(p, "b", 2)
-	p.ObserveRunning([]string{"a"}, at(3)) // traffic this EPP did not route
-	if got := p.Tier("a"); got != GPU {
-		t.Fatalf("Tier(a) = %v, want GPU while reported running", got)
-	}
-	if got := p.Admit("c"); !got.Blocked {
-		t.Fatalf("Admit(c) = %+v, want Blocked: a is reported running", got)
-	}
-	p.ObserveRunning(nil, at(1)) // a later snapshot without a
-	if got := p.Admit("c"); got.Blocked {
-		t.Fatalf("Admit(c) = %+v, want not Blocked once a is no longer reported", got)
 	}
 }
 
@@ -335,95 +318,12 @@ func TestSetCapacityShrinkForgetsOverflow(t *testing.T) {
 	}
 }
 
-func modelServed(m *Model, pod, adapter string, s int) {
-	m.Routed(pod, adapter)
-	m.Started(pod, adapter, at(s))
-	m.Finished(pod, adapter, at(s), true)
-}
-
-func TestModelKeepsPodsSeparateAndDeletes(t *testing.T) {
-	m := NewModel(2)
-	modelServed(m, "pod-0", "a", 1)
-	modelServed(m, "pod-1", "b", 2)
-	if got := m.Tier("pod-1", "a"); got != Absent {
-		t.Fatalf("pod-1 Tier(a) = %v, want Absent", got)
-	}
-	if got := m.Tier("pod-0", "b"); got != Absent {
-		t.Fatalf("pod-0 Tier(b) = %v, want Absent", got)
-	}
-	if got := m.Tier("pod-0", "a"); got != GPU {
-		t.Fatalf("pod-0 Tier(a) = %v, want GPU", got)
-	}
-	m.Delete("pod-0")
-	if got := m.Tier("pod-0", "a"); got != Absent {
-		t.Fatalf("after Delete, pod-0 Tier(a) = %v, want Absent", got)
-	}
-}
-
-func TestModelObserveCapacity(t *testing.T) {
-	m := NewModel(2) // max_cpu_loras = 2
-	m.ObserveCapacity("pod-0", 1)
-	modelServed(m, "pod-0", "a", 1)
-	modelServed(m, "pod-0", "b", 2)
-	if got := m.Tier("pod-0", "a"); got != CPU {
-		t.Fatalf("Tier(a) = %v, want CPU with gpu=1, cpu=2", got)
-	}
-	m.ObserveCapacity("pod-0", 2)
-	if got := m.Tier("pod-0", "a"); got != GPU {
-		t.Fatalf("after capacity 2, Tier(a) = %v, want GPU", got)
-	}
-}
-
-// MaxActiveModels reads 0 when the max_lora label is absent (e.g. behind
-// vLLM's Rust frontend); that must not overwrite a real capacity.
-func TestModelIgnoresZeroCapacity(t *testing.T) {
-	m := NewModel(0)
-	m.ObserveCapacity("pod-0", 2)
-	m.ObserveCapacity("pod-0", 0)
-	modelServed(m, "pod-0", "a", 1)
-	modelServed(m, "pod-0", "b", 2)
-	if got := m.Tier("pod-0", "a"); got != GPU {
-		t.Fatalf("Tier(a) = %v, want GPU (capacity 0 ignored, 2 kept)", got)
-	}
-}
-
-func TestModelObservations(t *testing.T) {
-	m := NewModel(0)
-	m.ObserveCapacity("pod-0", 1)
-	modelServed(m, "pod-0", "a", 1)
-	m.ObserveActive("pod-0", []string{"a"})
-	if got := m.Admit("pod-0", "b"); !got.Blocked {
-		t.Fatalf("Admit(b) = %+v, want Blocked (a reported active)", got)
-	}
-	m.ObserveActive("pod-0", nil)
-	m.ObserveRunning("pod-0", []string{"a"}, at(2))
-	if got := m.Admit("pod-0", "b"); !got.Blocked {
-		t.Fatalf("Admit(b) = %+v, want Blocked (a reported running)", got)
-	}
-	if got := m.Admit("pod-9", "b"); got != (Admission{Tier: Absent}) {
-		t.Fatalf("unknown pod Admit = %+v, want Absent with no victim", got)
-	}
-}
-
 func TestStartedClearsPending(t *testing.T) {
 	p := NewPod(1, 2)
 	p.Routed("a")
 	p.Started("a", at(1))
 	if got := p.Pending("a"); got != 0 {
 		t.Fatalf("Pending(a) = %d, want 0 once started", got)
-	}
-}
-
-// A running report is evidence of execution, so its recency outlives the
-// snapshot that carried it.
-func TestObserveRunningRecencyOutlivesSnapshot(t *testing.T) {
-	p := NewPod(1, 3)
-	served(p, "a", 1)
-	served(p, "b", 2)
-	p.ObserveRunning([]string{"a"}, at(3))
-	p.ObserveRunning(nil, at(4))
-	if got := p.Tier("a"); got != GPU {
-		t.Fatalf("Tier(a) = %v, want GPU (seen running at 3, after b at 2)", got)
 	}
 }
 
@@ -484,20 +384,5 @@ func TestPendingStillBlocked(t *testing.T) {
 	p.Routed("b")
 	if got, want := p.Admit("b"), (Admission{Tier: Absent, Pending: true, Blocked: true}); got != want {
 		t.Fatalf("Admit(b) = %+v, want %+v", got, want)
-	}
-}
-
-func TestModelHas(t *testing.T) {
-	m := NewModel(0)
-	if m.Has("pod-0") {
-		t.Fatal("Has(pod-0) before any event")
-	}
-	m.ObserveCapacity("pod-0", 1)
-	if !m.Has("pod-0") {
-		t.Fatal("Has(pod-0) = false after an observation")
-	}
-	m.Delete("pod-0")
-	if m.Has("pod-0") {
-		t.Fatal("Has(pod-0) after Delete")
 	}
 }

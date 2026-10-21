@@ -19,6 +19,8 @@ package loraresidency
 import (
 	"context"
 	"encoding/json"
+	"math"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -32,7 +34,9 @@ import (
 	fwkrc "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/extractor/metrics"
+	sourcenotifications "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/source/notifications"
 
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/scorer/loraresidency/lorascore"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/scheduling/scorer/loraresidency/lorascore/residency"
 )
 
@@ -56,11 +60,14 @@ type rig struct {
 }
 
 // newRig builds a plugin over pods with the given max_loras and no activity,
-// announcing each pod as the runtime does.
-func newRig(t *testing.T, params Parameters, maxLoras int, pods ...string) *rig {
+// announcing each pod as the runtime does. set, if not nil, edits the default
+// parameters.
+func newRig(t *testing.T, set func(*Parameters), maxLoras int, pods ...string) *rig {
 	t.Helper()
-	if params.BaseModels == nil {
-		params.BaseModels = []string{"base"}
+	params := DefaultParameters()
+	params.BaseModels = []string{"base"}
+	if set != nil {
+		set(&params)
 	}
 	p, err := New("test", params)
 	if err != nil {
@@ -84,6 +91,29 @@ func newRig(t *testing.T, params Parameters, maxLoras int, pods ...string) *rig 
 }
 
 func (r *rig) id(pod string) string { return "ns/" + pod }
+
+// tier is where adapter is estimated to live on pod.
+func (r *rig) tier(pod, adapter string) residency.Tier {
+	return r.admit(pod, adapter).Tier
+}
+
+// admit is the estimated admission of adapter on pod.
+func (r *rig) admit(pod, adapter string) residency.Admission {
+	r.p.mu.Lock()
+	defer r.p.mu.Unlock()
+	if e := r.p.pods[r.id(pod)]; e != nil {
+		return e.Admit(adapter)
+	}
+	return residency.Admission{Tier: residency.Absent}
+}
+
+// tracked reports whether the plugin holds an estimate for pod.
+func (r *rig) tracked(pod string) bool {
+	r.p.mu.Lock()
+	defer r.p.mu.Unlock()
+	_, ok := r.p.pods[r.id(pod)]
+	return ok
+}
 
 func (r *rig) extract(eventType fwkdl.EventType, ep fwkdl.Endpoint) {
 	r.t.Helper()
@@ -247,14 +277,16 @@ func (r *rig) serve(model, pod string) {
 }
 
 func TestNewValidates(t *testing.T) {
-	neg := -1.0
-	for name, p := range map[string]Parameters{
-		"no base models":     {},
-		"bad half-life":      {BaseModels: []string{"b"}, DemandHalfLife: "soon"},
-		"zero half-life":     {BaseModels: []string{"b"}, DemandHalfLife: "0s"},
-		"negative weight":    {BaseModels: []string{"b"}, CopyCost: &neg},
-		"negative cpu loras": {BaseModels: []string{"b"}, MaxCPULoras: -1},
+	for name, set := range map[string]func(*Parameters){
+		"no base models":     func(p *Parameters) { p.BaseModels = nil },
+		"bad half-life":      func(p *Parameters) { p.DemandHalfLife = "soon" },
+		"zero half-life":     func(p *Parameters) { p.DemandHalfLife = "0s" },
+		"negative weight":    func(p *Parameters) { p.CopyCost = -1 },
+		"negative cpu loras": func(p *Parameters) { p.MaxCPULoras = -1 },
 	} {
+		p := DefaultParameters()
+		p.BaseModels = []string{"b"}
+		set(&p)
 		if _, err := New("x", p); err == nil {
 			t.Errorf("%s: New succeeded, want an error", name)
 		}
@@ -262,14 +294,28 @@ func TestNewValidates(t *testing.T) {
 }
 
 func TestFactoryDecodesAndRejectsUnknownFields(t *testing.T) {
-	good := json.RawMessage(`{"baseModels":["base"],"maxCpuLoras":4,"demandHalfLife":"30s","evictionWeight":0.5}`)
+	good := json.RawMessage(`{"baseModels":["base"],"maxCpuLoras":4,"demandHalfLife":"30s",` +
+		`"copyCost":0.3,"loadCost":2,"blockedCost":3,"pendingCost":0.4,"evictionWeight":0.5}`)
 	pl, err := Factory("n", fwkplugin.StrictDecoder(good), nil)
 	if err != nil {
 		t.Fatalf("Factory: %v", err)
 	}
 	p := pl.(*Plugin)
-	if p.weights.EvictionWeight != 0.5 || p.weights.CopyCost != 0.2 {
-		t.Fatalf("weights = %+v, want eviction 0.5 and default copy 0.2", p.weights)
+	if want := (lorascore.Weights{CopyCost: 0.3, LoadCost: 2, BlockedCost: 3, PendingCost: 0.4, EvictionWeight: 0.5}); p.weights != want {
+		t.Fatalf("weights = %+v, want %+v", p.weights, want)
+	}
+	if p.cpuSlots != 4 {
+		t.Fatalf("cpuSlots = %d, want 4", p.cpuSlots)
+	}
+	partial := json.RawMessage(`{"baseModels":["base"],"evictionWeight":0.5}`)
+	pl, err = Factory("n", fwkplugin.StrictDecoder(partial), nil)
+	if err != nil {
+		t.Fatalf("Factory: %v", err)
+	}
+	want := lorascore.DefaultWeights()
+	want.EvictionWeight = 0.5
+	if got := pl.(*Plugin).weights; got != want {
+		t.Fatalf("weights = %+v, want defaults with eviction 0.5: %+v", got, want)
 	}
 	if got := p.TypedName(); got.Type != Type || got.Name != "n" {
 		t.Fatalf("TypedName = %+v", got)
@@ -284,22 +330,81 @@ func TestFactoryDecodesAndRejectsUnknownFields(t *testing.T) {
 }
 
 func TestBaseModelRequestIsNeutralAndUntracked(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0", "p1")
+	r := newRig(t, nil, 1, "p0", "p1")
 	r.serve("a", "p0")
 	if s := r.score("base"); s["p0"] != s["p1"] {
 		t.Fatalf("base-model request must score pods equally, got %v", s)
 	}
 	req := r.route("base", "p1")
 	r.end(req, true, fwkrc.TerminationCauseNatural)
-	if got := r.p.model.Tier(r.id("p1"), "base"); got != residency.Absent {
+	if got := r.tier("p1", "base"); got != residency.Absent {
 		t.Fatalf("base model tracked as an adapter: Tier = %v", got)
 	}
 }
 
-func TestServedAdapterAttractsItsNextRequest(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0", "p1")
+// A request without a target model names no adapter: it is scored neutrally
+// and leaves no trace.
+func TestEmptyTargetModelIsNeutralAndUntracked(t *testing.T) {
+	r := newRig(t, nil, 1, "p0", "p1")
 	r.serve("a", "p0")
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.GPU {
+	if s := r.score(""); s["p0"] != 1 || s["p1"] != 1 {
+		t.Fatalf("empty target model must score every pod 1, got %v", s)
+	}
+	req := r.route("", "p1")
+	if len(r.p.requests) != 0 {
+		t.Fatalf("empty target model recorded: %v", r.p.requests)
+	}
+	r.end(req, true, fwkrc.TerminationCauseNatural)
+	if got := r.admit("p1", ""); got.Tier != residency.Absent || got.Pending {
+		t.Fatalf("empty target model tracked as an adapter: %+v", got)
+	}
+	if got := r.p.demand.Rate("", r.now); got != 0 {
+		t.Fatalf("empty target model counted as demand: %v", got)
+	}
+}
+
+// The datalayer binds one endpoint extractor per type, so a second instance
+// would never see endpoint events.
+func TestFactoryRejectsMultipleInstances(t *testing.T) {
+	params := json.RawMessage(`{"baseModels":["base"]}`)
+	handle := fwkplugin.NewEppHandle(context.Background(), nil)
+	first, err := Factory("first", fwkplugin.StrictDecoder(params), handle)
+	if err != nil {
+		t.Fatalf("Factory: %v", err)
+	}
+	handle.AddPlugin(first.TypedName().Name, first)
+	if _, err := Factory("second", fwkplugin.StrictDecoder(params), handle); err == nil {
+		t.Fatal("Factory accepted a second instance")
+	}
+}
+
+// maxCpuLoras sizes the CPU tier: with max_loras 1 and two CPU slots, the
+// adapter displaced from GPU is still in the CPU cache.
+func TestMaxCPULorasSizesCPUTier(t *testing.T) {
+	for cpu, want := range map[int]residency.Tier{0: residency.Absent, 2: residency.CPU} {
+		r := newRig(t, func(p *Parameters) { p.MaxCPULoras = cpu }, 1, "p0")
+		r.serve("a", "p0")
+		r.serve("b", "p0")
+		if got := r.tier("p0", "a"); got != want {
+			t.Errorf("maxCpuLoras %d: Tier(a) = %v, want %v", cpu, got, want)
+		}
+	}
+}
+
+// demandHalfLife sets how fast demand decays.
+func TestDemandHalfLifeApplied(t *testing.T) {
+	r := newRig(t, func(p *Parameters) { p.DemandHalfLife = "10s" }, 1, "p0")
+	r.route("a", "p0")
+	r0 := r.p.demand.Rate("a", r.now)
+	if got := r.p.demand.Rate("a", r.now.Add(10*time.Second)); r0 == 0 || math.Abs(got-r0/2) > 1e-9*r0 {
+		t.Fatalf("Rate after 10s = %v, want half of %v", got, r0)
+	}
+}
+
+func TestServedAdapterAttractsItsNextRequest(t *testing.T) {
+	r := newRig(t, nil, 1, "p0", "p1")
+	r.serve("a", "p0")
+	if got := r.tier("p0", "a"); got != residency.GPU {
 		t.Fatalf("Tier(p0, a) = %v, want GPU after a served request", got)
 	}
 	if s := r.score("a"); !(s["p0"] > s["p1"]) {
@@ -312,27 +417,27 @@ func TestServedAdapterAttractsItsNextRequest(t *testing.T) {
 
 // Started comes from the first body chunk, not from routing or headers.
 func TestRoutedOnlyIsPendingNotResident(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0", "p1")
+	r := newRig(t, nil, 1, "p0", "p1")
 	req := r.route("a", "p0")
 	r.header(req, "200")
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.Absent {
+	if got := r.tier("p0", "a"); got != residency.Absent {
 		t.Fatalf("Tier = %v, want Absent before the first chunk", got)
 	}
 	if s := r.score("a"); !(s["p0"] > s["p1"]) {
 		t.Fatalf("pending pod should attract the burst, got %v", s)
 	}
 	r.chunk(req, true)
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.GPU {
+	if got := r.tier("p0", "a"); got != residency.GPU {
 		t.Fatalf("Tier = %v, want GPU after the first chunk", got)
 	}
 }
 
 func TestErrorStatusIsNotExecution(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
+	r := newRig(t, nil, 1, "p0")
 	req := r.route("a", "p0")
 	r.header(req, "503")
 	r.end(req, true, fwkrc.TerminationCauseNatural) // an error delivered in full is natural
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.Absent {
+	if got := r.tier("p0", "a"); got != residency.Absent {
 		t.Fatalf("Tier = %v, want Absent after an error response", got)
 	}
 	if len(r.p.requests) != 0 {
@@ -343,11 +448,11 @@ func TestErrorStatusIsNotExecution(t *testing.T) {
 // A plain "status" key, which the EPP's own check also accepts, counts as an
 // error status too.
 func TestPlainStatusKeyErrorIsNotExecution(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
+	r := newRig(t, nil, 1, "p0")
 	req := r.route("a", "p0")
 	r.headerKey(req, "status", "404")
 	r.end(req, true, fwkrc.TerminationCauseNatural)
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.Absent {
+	if got := r.tier("p0", "a"); got != residency.Absent {
 		t.Fatalf("Tier = %v, want Absent after an error response", got)
 	}
 }
@@ -359,14 +464,14 @@ func TestSyntheticAbortCleanupLeavesNoTrace(t *testing.T) {
 	for _, cause := range []fwkrc.TerminationCause{
 		fwkrc.TerminationCauseClientDisconnect, fwkrc.TerminationCauseError, fwkrc.TerminationCauseEvicted,
 	} {
-		r := newRig(t, Parameters{}, 1, "p0")
+		r := newRig(t, nil, 1, "p0")
 		req := r.route("a", "p0")
 		r.header(req, "200")
 		r.end(req, true, cause)
-		if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.Absent {
+		if got := r.tier("p0", "a"); got != residency.Absent {
 			t.Fatalf("%s: Tier = %v, want Absent after the cleanup call", cause, got)
 		}
-		if got := r.p.model.Admit(r.id("p0"), "a"); got.Pending {
+		if got := r.admit("p0", "a"); got.Pending {
 			t.Fatalf("%s: Admit = %+v, want no pending request after the cleanup", cause, got)
 		}
 		if len(r.p.requests) != 0 {
@@ -378,47 +483,47 @@ func TestSyntheticAbortCleanupLeavesNoTrace(t *testing.T) {
 // A non-streaming success is one call with both flags and a natural cause:
 // that is execution.
 func TestNaturalOneShotResponseIsExecution(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
+	r := newRig(t, nil, 1, "p0")
 	req := r.route("a", "p0")
 	r.header(req, "200")
 	r.end(req, true, fwkrc.TerminationCauseNatural)
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.GPU {
+	if got := r.tier("p0", "a"); got != residency.GPU {
 		t.Fatalf("Tier = %v, want GPU after a complete one-shot response", got)
 	}
 }
 
 // A stream cut short after its first chunk did execute.
 func TestDisconnectAfterFirstChunkStillExecuted(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
+	r := newRig(t, nil, 1, "p0")
 	req := r.route("a", "p0")
 	r.header(req, "200")
 	r.chunk(req, true)
 	r.end(req, false, fwkrc.TerminationCauseClientDisconnect)
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.GPU {
+	if got := r.tier("p0", "a"); got != residency.GPU {
 		t.Fatalf("Tier = %v, want GPU: the adapter ran before the disconnect", got)
 	}
 }
 
 // An error status in the framework's header map must stop the first chunk from counting, on the streaming path too.
 func TestStreamedErrorStatusIsNotExecution(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
+	r := newRig(t, nil, 1, "p0")
 	req := r.route("a", "p0")
 	r.header(req, "500")
 	r.chunk(req, true)
 	r.end(req, false, fwkrc.TerminationCauseNatural)
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.Absent {
+	if got := r.tier("p0", "a"); got != residency.Absent {
 		t.Fatalf("Tier = %v, want Absent after a 500 response", got)
 	}
 }
 
 func TestDuplicatePreRequestCountedOnce(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
+	r := newRig(t, nil, 1, "p0")
 	req := r.route("a", "p0")
 	if err := r.p.PreRequest(ctx, req, req.SchedulingResult); err != nil {
 		t.Fatal(err)
 	}
 	r.end(req, true, fwkrc.TerminationCauseClientDisconnect) // one abort clears the one pending route
-	if got := r.p.model.Admit(r.id("p0"), "a"); got.Pending {
+	if got := r.admit("p0", "a"); got.Pending {
 		t.Fatalf("Admit = %+v, want the duplicate PreRequest ignored", got)
 	}
 }
@@ -426,8 +531,7 @@ func TestDuplicatePreRequestCountedOnce(t *testing.T) {
 // ActiveModels feeds ObserveActive: an adapter the pod reports active is
 // protected, so the pod counts as blocked rather than offering it as a victim.
 func TestActiveModelsProtectResidentAdapter(t *testing.T) {
-	blocked, noEviction := 10.0, 0.0
-	r := newRig(t, Parameters{BlockedCost: &blocked, EvictionWeight: &noEviction}, 1, "p0", "p1")
+	r := newRig(t, func(p *Parameters) { p.BlockedCost, p.EvictionWeight = 10, 0 }, 1, "p0", "p1")
 	r.serve("a", "p0")
 	r.serve("x", "p1")
 	if s := r.score("b"); s["p0"] != s["p1"] {
@@ -440,94 +544,100 @@ func TestActiveModelsProtectResidentAdapter(t *testing.T) {
 }
 
 func TestCapacityComesFromMaxActiveModels(t *testing.T) {
-	r := newRig(t, Parameters{}, 2, "p0")
+	r := newRig(t, nil, 2, "p0")
 	r.serve("a", "p0")
 	r.serve("b", "p0")
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.GPU {
+	if got := r.tier("p0", "a"); got != residency.GPU {
 		t.Fatalf("Tier(a) = %v, want GPU with max_loras 2", got)
 	}
 }
 
 func TestEndpointDeleteForgetsPod(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
+	r := newRig(t, nil, 1, "p0")
 	r.serve("a", "p0")
 	r.del("p0")
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.Absent {
+	if got := r.tier("p0", "a"); got != residency.Absent {
 		t.Fatalf("Tier = %v, want Absent after the endpoint is deleted", got)
 	}
-	if got := len(r.p.endpoints) + len(r.p.genSeq); got != 0 {
-		t.Fatalf("endpoint/generation records = %d after delete, want 0 (pods that never return must not leak)", got)
+	if got := len(r.p.endpoints) + len(r.p.pods); got != 0 {
+		t.Fatalf("endpoint/estimate records = %d after delete, want 0 (pods that never return must not leak)", got)
+	}
+}
+
+// Deleting one pod keeps the others' estimates.
+func TestDeleteForgetsOnlyThatPod(t *testing.T) {
+	r := newRig(t, nil, 1, "p0", "p1")
+	r.serve("a", "p0")
+	r.serve("b", "p1")
+	r.del("p1")
+	if r.tracked("p1") || !r.tracked("p0") {
+		t.Fatalf("after deleting p1: tracked p0=%v p1=%v, want only p0", r.tracked("p0"), r.tracked("p1"))
 	}
 }
 
 // An update re-dispatches the same endpoint object (Runtime.UpdateEndpoint),
 // so it must keep the pod's state.
 func TestEndpointUpdateKeepsPod(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
+	r := newRig(t, nil, 1, "p0")
 	r.serve("a", "p0")
 	r.update("p0")
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.GPU {
+	if got := r.tier("p0", "a"); got != residency.GPU {
 		t.Fatalf("Tier = %v, want GPU kept across an update of the same endpoint", got)
 	}
-	r.serve("b", "p0") // a snapshot after the update is still the current generation
-	if got := r.p.model.Tier(r.id("p0"), "b"); got != residency.GPU {
-		t.Fatalf("Tier(b) = %v, want GPU: an update must not stale later snapshots", got)
+	r.serve("b", "p0")
+	if got := r.tier("p0", "b"); got != residency.GPU {
+		t.Fatalf("Tier(b) = %v, want GPU: an update must not drop later requests", got)
 	}
 }
 
-// Every announced object carries its generation into the director's snapshot.
-func TestAddStampsGenerationIntoSnapshots(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
-	snap, _ := r.snapshot()
-	v, ok := snap["p0"].Get(generationKey)
-	if !ok {
-		t.Fatal("snapshot endpoint carries no generation stamp")
-	}
-	if g := uint64(v.(generation)); g != r.p.genSeq[r.id("p0")] {
-		t.Fatalf("stamp %d, want the pod's current generation %d", g, r.p.genSeq[r.id("p0")])
-	}
-}
-
-// The stamp must stay readable through the scorer's data scope, and declaring
-// it must pass the EPP's startup validation. Extract writes the stamp, so it is
-// declared in Produces(); listing it in Consumes() as well would draw the
-// "optional data key has no producer" warning at startup.
-func TestGenerationKeyDeclaredAndStartupValid(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
-	_, list := r.snapshot()
-	scoped, _ := datalayer.Scope(logr.Discard(), "Scorer", r.p, list)
-	if _, ok := scoped[0].Get(generationKey); !ok {
-		t.Fatal("generation stamp hidden by the data scope; declare it in Produces()")
-	}
-	deps := r.p.Consumes()
-	if _, ok := deps.Required[generationKey]; ok {
-		t.Fatal("generation stamp listed in Consumes().Required")
-	}
-	if _, ok := deps.Optional[generationKey]; ok {
-		t.Fatal("generation stamp listed in Consumes().Optional")
-	}
-	// The core metrics extractor is the producer the EPP runs beside the plugin.
+// The declared dependencies must pass the EPP's startup validation beside the
+// core metrics extractor, the producer the EPP runs with the plugin.
+func TestDependenciesStartupValid(t *testing.T) {
+	r := newRig(t, nil, 1, "p0")
 	ext, err := metrics.NewCoreMetricsExtractor(metrics.NewMappingRegistry(), "")
 	if err != nil {
 		t.Fatalf("NewCoreMetricsExtractor: %v", err)
 	}
 	plugins := []fwkplugin.Plugin{ext, r.p}
-	reg, err := fwkdl.BuildRegistry(plugins)
-	if err != nil {
+	if _, err := fwkdl.BuildRegistry(plugins); err != nil {
 		t.Fatalf("BuildRegistry: %v", err)
-	}
-	if !reg.Has(generationKey) {
-		t.Fatal("registry does not know the generation stamp")
 	}
 	if _, err := datalayer.ValidateAndOrderDataDependencies(plugins); err != nil {
 		t.Fatalf("ValidateAndOrderDataDependencies: %v", err)
 	}
 }
 
+type recordingRegistrar struct {
+	registrations []fwkdl.PendingRegistration
+}
+
+func (r *recordingRegistrar) Register(registration fwkdl.PendingRegistration) error {
+	r.registrations = append(r.registrations, registration)
+	return nil
+}
+
+// Extract only runs if the plugin registers for endpoint notifications.
+func TestRegistersEndpointExtractor(t *testing.T) {
+	r := newRig(t, nil, 1)
+	reg := &recordingRegistrar{}
+	if err := r.p.RegisterDependencies(reg); err != nil {
+		t.Fatalf("RegisterDependencies: %v", err)
+	}
+	if len(reg.registrations) != 1 {
+		t.Fatalf("registrations = %d, want 1", len(reg.registrations))
+	}
+	got := reg.registrations[0]
+	if got.Owner != r.p.TypedName() || got.SourceType != sourcenotifications.EndpointNotificationSourceType ||
+		got.Extractor != fwkdl.EndpointExtractor(r.p) || got.DefaultSource == nil {
+		t.Fatalf("registration = %+v, want owner %v, source type %q, the plugin as extractor and a default source",
+			got, r.p.TypedName(), sourcenotifications.EndpointNotificationSourceType)
+	}
+}
+
 // Callbacks for requests on a deleted pod must not
 // recreate it, so a pod recreated under the same name starts clean.
 func TestLateCallbacksDoNotResurrectDeletedPod(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
+	r := newRig(t, nil, 1, "p0")
 	running := r.route("a", "p0")
 	r.header(running, "200")
 	r.chunk(running, true)
@@ -536,7 +646,7 @@ func TestLateCallbacksDoNotResurrectDeletedPod(t *testing.T) {
 	r.chunk(pending, true)
 	r.end(pending, false, fwkrc.TerminationCauseNatural)
 	r.end(running, false, fwkrc.TerminationCauseNatural)
-	if r.p.model.Has(r.id("p0")) {
+	if r.tracked("p0") {
 		t.Fatal("late callbacks recreated the deleted pod")
 	}
 	if len(r.p.requests) != 0 {
@@ -546,31 +656,32 @@ func TestLateCallbacksDoNotResurrectDeletedPod(t *testing.T) {
 
 // A pod deleted and added again under the same name is tracked afresh.
 func TestReaddedPodTrackedAgain(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
+	r := newRig(t, nil, 1, "p0")
 	r.serve("a", "p0")
 	r.del("p0")
 	r.replace("p0")
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.Absent {
+	if got := r.tier("p0", "a"); got != residency.Absent {
 		t.Fatalf("Tier(a) = %v, want Absent: the re-added pod inherited old residency", got)
 	}
 	r.serve("b", "p0")
-	if got := r.p.model.Tier(r.id("p0"), "b"); got != residency.GPU {
+	if got := r.tier("p0", "b"); got != residency.GPU {
 		t.Fatalf("Tier(b) = %v, want GPU once the pod is added again", got)
 	}
 }
 
-// An add carrying a different endpoint object under an existing ID is a new
-// generation (Runtime.NewEndpoint builds a fresh object). Order add(old) -> activity(old) -> add(new) -> delete(old).
-func TestReplacementAddStartsNewGeneration(t *testing.T) {
-	r := newRig(t, Parameters{}, 2, "p0")
-	r.serve("a", "p0") // old generation: a resident
+// An add carrying a different endpoint object under an existing ID is a new pod
+// (Runtime.NewEndpoint builds a fresh object). Order: add(old), activity(old),
+// add(new), delete(old).
+func TestReplacementAddStartsEmpty(t *testing.T) {
+	r := newRig(t, nil, 2, "p0")
+	r.serve("a", "p0") // old object: a resident
 	running := r.route("c", "p0")
 	r.header(running, "200")
-	r.chunk(running, true) // old generation: c running
+	r.chunk(running, true) // old object: c running
 	pending := r.route("d", "p0")
 	old := r.replace("p0")
 	for _, adapter := range []string{"a", "c"} {
-		if got := r.p.model.Tier(r.id("p0"), adapter); got != residency.Absent {
+		if got := r.tier("p0", adapter); got != residency.Absent {
 			t.Fatalf("Tier(%s) = %v, want Absent: the replacement inherited old residency", adapter, got)
 		}
 	}
@@ -578,13 +689,13 @@ func TestReplacementAddStartsNewGeneration(t *testing.T) {
 	r.end(pending, false, fwkrc.TerminationCauseNatural)
 	r.end(running, false, fwkrc.TerminationCauseNatural)
 	for _, adapter := range []string{"c", "d"} {
-		if got := r.p.model.Tier(r.id("p0"), adapter); got != residency.Absent {
-			t.Fatalf("Tier(%s) = %v, want Absent: an old-generation callback reached the replacement", adapter, got)
+		if got := r.tier("p0", adapter); got != residency.Absent {
+			t.Fatalf("Tier(%s) = %v, want Absent: an old-object callback reached the replacement", adapter, got)
 		}
 	}
-	r.serve("x", "p0") // new generation
+	r.serve("x", "p0") // new object
 	r.extract(fwkdl.EventDelete, old)
-	if got := r.p.model.Tier(r.id("p0"), "x"); got != residency.GPU {
+	if got := r.tier("p0", "x"); got != residency.GPU {
 		t.Fatalf("Tier(x) = %v, want GPU: the old object's delete wiped the replacement", got)
 	}
 	if got := len(r.p.requests); got != 0 {
@@ -592,98 +703,56 @@ func TestReplacementAddStartsNewGeneration(t *testing.T) {
 	}
 }
 
-// The director clones candidates before the scheduler invokes the
-// scorer, so a replacement can land after the old endpoint was cloned and
-// before Score runs. The decision must still be bound to the clone's
-// generation, not to when Score ran.
-func TestSnapshotBeforeReplacementScoredAfterRejected(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
-	snap, _ := r.snapshot() // director clones the old endpoint
-	r.replace("p0")
-	req := r.scoreOn("a", snap) // Score runs after the replacement
-	r.preRequest(req, "p0")
-	r.succeed(req)
-	if r.p.model.Tier(r.id("p0"), "a") != residency.Absent || len(r.p.requests) != 0 {
-		t.Fatalf("an old-snapshot decision was recorded against the replacement: Tier=%v requests=%v",
-			r.p.model.Tier(r.id("p0"), "a"), r.p.requests)
-	}
-}
-
-// A replacement between Score and PreRequest.
-func TestReplacementBetweenScoreAndPreRequestRejected(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
-	req := r.scoreReq("a")
-	r.replace("p0")
-	r.preRequest(req, "p0")
-	r.succeed(req)
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.Absent {
-		t.Fatalf("Tier(replacement, a) = %v, want Absent: a pre-replacement decision was recorded", got)
-	}
-}
-
-// The same race across a delete and re-add of the same name.
-func TestStaleSnapshotAcrossDeleteAndReaddRejected(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
-	req := r.scoreReq("a")
-	r.del("p0")
-	r.replace("p0")
-	r.preRequest(req, "p0")
-	r.succeed(req)
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.Absent {
-		t.Fatalf("Tier = %v, want Absent: the decision predates the delete", got)
-	}
-}
-
 // A delete between Score and PreRequest, with no re-add.
 func TestDeleteBetweenScoreAndPreRequestRejected(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
+	r := newRig(t, nil, 1, "p0")
 	req := r.scoreReq("a")
 	r.del("p0")
 	r.preRequest(req, "p0")
 	r.succeed(req)
-	if r.p.model.Has(r.id("p0")) || len(r.p.requests) != 0 {
+	if r.tracked("p0") || len(r.p.requests) != 0 {
 		t.Fatalf("a decision for a deleted pod was recorded: requests=%v", r.p.requests)
 	}
 }
 
-// A same-object update anywhere in the decision is not a new generation.
+// A same-object update anywhere in the decision is not a new pod.
 func TestUpdateAroundScoreAccepted(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
+	r := newRig(t, nil, 1, "p0")
 	snap, _ := r.snapshot()
 	r.update("p0")
 	req := r.scoreOn("a", snap)
 	r.update("p0")
 	r.preRequest(req, "p0")
 	r.succeed(req)
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.GPU {
-		t.Fatalf("Tier = %v, want GPU: an update is not a generation change", got)
+	if got := r.tier("p0", "a"); got != residency.GPU {
+		t.Fatalf("Tier = %v, want GPU: an update is not a new pod", got)
 	}
 }
 
-// A generation change or an update on another pod must not reject a decision
-// for this one.
-func TestOtherPodGenerationDoesNotReject(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0", "p1")
+// A replacement or an update of another pod must not reject a decision for
+// this one.
+func TestOtherPodReplacementDoesNotReject(t *testing.T) {
+	r := newRig(t, nil, 1, "p0", "p1")
 	req := r.scoreReq("a")
 	r.replace("p1")
 	r.update("p1")
 	r.preRequest(req, "p0")
 	r.succeed(req)
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.GPU {
-		t.Fatalf("Tier(p0) = %v, want GPU: only p1 changed generation", got)
+	if got := r.tier("p0", "a"); got != residency.GPU {
+		t.Fatalf("Tier(p0) = %v, want GPU: only p1 was replaced", got)
 	}
 }
 
 // A same-object update in the middle of a request keeps it.
 func TestUpdateMidRequestKeepsRequest(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
+	r := newRig(t, nil, 1, "p0")
 	req := r.route("a", "p0")
 	r.header(req, "200")
 	r.update("p0")
 	r.chunk(req, true)
 	r.update("p0")
 	r.end(req, false, fwkrc.TerminationCauseNatural)
-	if got := r.p.model.Tier(r.id("p0"), "a"); got != residency.GPU {
+	if got := r.tier("p0", "a"); got != residency.GPU {
 		t.Fatalf("Tier = %v, want GPU: updates mid-request must not drop it", got)
 	}
 }
@@ -691,143 +760,101 @@ func TestUpdateMidRequestKeepsRequest(t *testing.T) {
 // A stale candidate snapshot scored after a delete must not recreate an
 // estimate for the deleted pod, which nothing would ever remove.
 func TestScoreAfterDeleteDoesNotRecreatePod(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
+	r := newRig(t, nil, 1, "p0")
 	snap, _ := r.snapshot()
 	r.del("p0")
 	r.scoreOn("a", snap)
-	if r.p.model.Has(r.id("p0")) {
+	if r.tracked("p0") {
 		t.Fatal("Score recreated an estimate for a deleted pod")
 	}
 }
 
-// An endpoint the plugin never stamped (announced before it was configured)
-// cannot be checked by generation; the tombstone still rejects a decision for
-// it within tombstoneTTL, after which it is accepted, a stated limit.
-func TestUnstampedEndpointGuardedByTombstone(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
-	o := r.cur["p0"]
-	unstamped := map[string]fwksched.Endpoint{"p0": fwksched.NewEndpoint(o.GetMetadata(), o.GetMetrics(), nil)}
-	r.del("p0")
-	req := r.scoreOn("a", unstamped)
-	r.preRequest(req, "p0")
-	if len(r.p.requests) != 0 {
-		t.Fatal("a decision for a deleted, unstamped pod was accepted within tombstoneTTL")
-	}
-	r.now = r.now.Add(tombstoneTTL)
-	req = r.scoreOn("a", unstamped)
-	r.preRequest(req, "p0")
-	if len(r.p.requests) != 1 {
-		t.Fatal("after tombstoneTTL an unstamped decision should be accepted (stated limit)")
-	}
-}
-
-// Tombstones expire and are pruned on later deletes.
-func TestTombstonesPruned(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0", "p1")
-	r.del("p0")
-	r.now = r.now.Add(tombstoneTTL)
-	r.del("p1")
-	if _, ok := r.p.deleted[r.id("p0")]; ok {
-		t.Fatalf("expired tombstone for p0 not pruned: %v", r.p.deleted)
-	}
-	if _, ok := r.p.deleted[r.id("p1")]; !ok {
-		t.Fatalf("fresh tombstone for p1 missing: %v", r.p.deleted)
-	}
-}
-
-// Replacements concurrent with scoring. Whatever the interleaving, a
-// request record may exist only for a decision made on the pod's current
-// generation; run with -race.
-func TestConcurrentReplacementNeverAcceptsStaleSnapshot(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
-	meta, metrics := r.cur["p0"].GetMetadata(), r.cur["p0"].GetMetrics()
+// Replacements and deletes concurrent with scheduling and responses. Whatever
+// the interleaving, every estimate and request record must belong to a live
+// endpoint; run with -race.
+func TestConcurrentLifecycleLeavesNoOrphans(t *testing.T) {
+	r := newRig(t, nil, 1, "p0")
+	meta, m := r.cur["p0"].GetMetadata(), r.cur["p0"].GetMetrics()
 	var objMu sync.Mutex
 	current := r.cur["p0"]
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go func() { // the runtime replacing the endpoint
+	go func() { // the runtime replacing and deleting the endpoint
 		defer wg.Done()
-		for {
+		for i := 0; ; i++ {
 			select {
 			case <-stop:
 				return
 			default:
 			}
-			obj := fwkdl.NewEndpoint(meta, metrics)
+			objMu.Lock()
+			old := current
+			objMu.Unlock()
+			if i%2 == 0 {
+				_ = r.p.Extract(ctx, fwkdl.EndpointEvent{Type: fwkdl.EventDelete, Endpoint: old})
+			}
+			obj := fwkdl.NewEndpoint(meta, m)
 			_ = r.p.Extract(ctx, fwkdl.EndpointEvent{Type: fwkdl.EventAddOrUpdate, Endpoint: obj})
 			objMu.Lock()
 			current = obj
 			objMu.Unlock()
 		}
 	}()
-	for i := 0; i < 500; i++ { // the director scheduling requests
+	accepted := 0
+	for i := 0; i < 2000; i++ { // the director scheduling requests and the server answering
 		objMu.Lock()
 		o := current
 		objMu.Unlock()
 		ep := fwksched.NewEndpoint(o.GetMetadata(), o.GetMetrics(), o.GetAttributes())
-		req := &fwksched.InferenceRequest{RequestID: string(rune(0x1000 + i)), TargetModel: "a"}
-		r.runScore(req, []fwksched.Endpoint{ep})
+		req := &fwksched.InferenceRequest{RequestID: strconv.Itoa(i), TargetModel: "a"}
+		r.p.Score(ctx, req, []fwksched.Endpoint{ep})
 		result := &fwksched.SchedulingResult{PrimaryProfileName: "default", ProfileResults: map[string]*fwksched.ProfileRunResult{
 			"default": {TargetEndpoints: []fwksched.Endpoint{ep}},
 		}}
 		if err := r.p.PreRequest(ctx, req, result); err != nil {
 			t.Fatal(err)
 		}
-		v, ok := ep.Get(generationKey)
 		r.p.mu.Lock()
-		_, recorded := r.p.requests[req.RequestID]
-		if recorded && (!ok || uint64(v.(generation)) != r.p.genSeq[r.id("p0")]) {
-			r.p.mu.Unlock()
-			t.Fatalf("request %d recorded from a stale snapshot", i)
+		if _, ok := r.p.requests[req.RequestID]; ok {
+			accepted++
+		}
+		r.p.mu.Unlock()
+		r.p.ResponseHeader(ctx, req, &fwkrc.Response{RequestID: req.RequestID, Headers: map[string]string{":status": "200"}}, nil)
+		r.p.ResponseBody(ctx, req, &fwkrc.Response{RequestID: req.RequestID, StartOfStream: true}, nil)
+		r.p.ResponseBody(ctx, req, &fwkrc.Response{RequestID: req.RequestID, EndOfStream: true, TerminationCause: fwkrc.TerminationCauseNatural}, nil)
+		r.p.mu.Lock()
+		for id := range r.p.pods {
+			if _, live := r.p.endpoints[id]; !live {
+				r.p.mu.Unlock()
+				t.Fatalf("iteration %d: estimate for %s, which has no live endpoint", i, id)
+			}
+		}
+		for rid, rec := range r.p.requests {
+			if _, live := r.p.endpoints[rec.pod]; !live {
+				r.p.mu.Unlock()
+				t.Fatalf("iteration %d: request %s recorded on %s, which has no live endpoint", i, rid, rec.pod)
+			}
 		}
 		r.p.mu.Unlock()
 	}
 	close(stop)
 	wg.Wait()
+	if accepted == 0 {
+		t.Fatal("no request was ever recorded, so the invariant was never exercised")
+	}
 }
 
 // A first add for an ID is a new pod too: state recorded under the ID before
 // the add (which the runtime's ordering should rule out) is not inherited.
 func TestFirstAddForgetsEarlierState(t *testing.T) {
-	r := newRig(t, Parameters{}, 1)
-	r.p.model.Routed("ns/p0", "a")
-	r.p.model.Started("ns/p0", "a", r.now)
+	r := newRig(t, nil, 1)
+	r.p.pod("ns/p0").Routed("a")
+	r.p.pod("ns/p0").Started("a", r.now)
 	obj := fwkdl.NewEndpoint(&fwkdl.EndpointMetadata{ID: k8stypes.NamespacedName{Namespace: "ns", Name: "p0"}},
 		&fwkdl.Metrics{ActiveModels: map[string]int{}, WaitingModels: map[string]int{}, MaxActiveModels: 1})
 	r.extract(fwkdl.EventAddOrUpdate, obj)
-	if r.p.model.Has("ns/p0") {
+	if r.tracked("p0") {
 		t.Fatal("the first add kept state recorded before it")
-	}
-}
-
-// Scoring a snapshot cloned before a replacement must not write the old
-// object's metrics into the replacement's estimate.
-func TestStaleSnapshotMetricsNotObserved(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
-	snap, _ := r.snapshot()
-	snap["p0"].GetMetrics().ActiveModels["x"] = 1 // the old object's last scrape
-	old := r.cur["p0"]
-	repl := fwkdl.NewEndpoint(old.GetMetadata(),
-		&fwkdl.Metrics{ActiveModels: map[string]int{}, WaitingModels: map[string]int{}, MaxActiveModels: 1})
-	r.extract(fwkdl.EventAddOrUpdate, repl)
-	r.cur["p0"] = repl
-	r.serve("x", "p0") // the replacement holds x, idle
-	r.scoreOn("b", snap)
-	if got := r.p.model.Admit(r.id("p0"), "b"); got.Blocked {
-		t.Fatalf("Admit(b) = %+v: the old object's ActiveModels protected x on the replacement", got)
-	}
-}
-
-// For an unstamped snapshot endpoint only the tombstone shows the pod is gone,
-// so Score must consult it too.
-func TestUnstampedScoreAfterDeleteDoesNotRecreatePod(t *testing.T) {
-	r := newRig(t, Parameters{}, 1, "p0")
-	o := r.cur["p0"]
-	unstamped := map[string]fwksched.Endpoint{"p0": fwksched.NewEndpoint(o.GetMetadata(), o.GetMetrics(), nil)}
-	r.del("p0")
-	r.scoreOn("a", unstamped)
-	if r.p.model.Has(r.id("p0")) {
-		t.Fatal("Score recreated an estimate for a deleted, unstamped pod")
 	}
 }

@@ -29,10 +29,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrc "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
@@ -47,28 +52,9 @@ import (
 // Type is the plugin type name used in EndpointPickerConfig.
 const Type = "lora-residency-scorer"
 
-// tombstoneTTL bounds how long a deleted ID refuses new routes. It only has to
-// outlast a scheduling cycle that raced the delete (late callbacks find no
-// record, since the delete purged them), and expiring it keeps the set from
-// growing with every pod name that never returns.
-const tombstoneTTL = 5 * time.Minute
-
-// generationKey names the endpoint attribute carrying the plugin's generation
-// number for an endpoint object. The director clones endpoint attributes into
-// each request's candidate snapshot, so the picked snapshot endpoint says which
-// generation the decision was made on.
-var generationKey = fwkplugin.NewDataKey("LoRAResidencyGeneration", Type)
-
-// generation is the attribute value stored under generationKey.
-type generation uint64
-
-// Clone implements fwkdl.Cloneable.
-func (g generation) Clone() fwkdl.Cloneable { return g }
-
 var (
 	_ fwksched.Scorer               = &Plugin{}
 	_ fwkplugin.ConsumerPlugin      = &Plugin{}
-	_ fwkplugin.ProducerPlugin      = &Plugin{}
 	_ fwkrc.PreRequest              = &Plugin{}
 	_ fwkrc.ResponseHeaderProcessor = &Plugin{}
 	_ fwkrc.ResponseBodyProcessor   = &Plugin{}
@@ -89,23 +75,38 @@ type Parameters struct {
 	// DemandHalfLife is how fast the per-adapter demand estimate forgets, as
 	// a Go duration. Default "60s".
 	DemandHalfLife string `json:"demandHalfLife,omitempty"`
-	// Weights override lorascore.DefaultWeights field by field.
-	CopyCost       *float64 `json:"copyCost,omitempty"`
-	LoadCost       *float64 `json:"loadCost,omitempty"`
-	BlockedCost    *float64 `json:"blockedCost,omitempty"`
-	PendingCost    *float64 `json:"pendingCost,omitempty"`
-	EvictionWeight *float64 `json:"evictionWeight,omitempty"`
+	lorascore.Weights
 }
 
-// Factory builds the plugin from its configuration parameters.
-func Factory(name string, params *json.Decoder, _ fwkplugin.Handle) (fwkplugin.Plugin, error) {
-	var p Parameters
+// DefaultParameters returns parameters with the default weights and no base
+// models.
+func DefaultParameters() Parameters {
+	return Parameters{Weights: lorascore.DefaultWeights()}
+}
+
+// Factory builds the plugin from its configuration parameters. Only one
+// instance is supported: the datalayer binds one endpoint extractor per type,
+// so a second instance would never see endpoint events.
+func Factory(name string, params *json.Decoder, handle fwkplugin.Handle) (fwkplugin.Plugin, error) {
+	p := DefaultParameters()
 	if params != nil {
 		if err := params.Decode(&p); err != nil {
 			return nil, fmt.Errorf("%s: parameters: %w", Type, err)
 		}
 	}
-	return New(name, p)
+	plugin, err := New(name, p)
+	if err != nil {
+		return nil, err
+	}
+	if handle != nil {
+		for _, existing := range handle.GetAllPlugins() {
+			if existing.TypedName().Type == Type {
+				return nil, fmt.Errorf("multiple %q instances configured (%s, %s); only one instance is supported",
+					Type, existing.TypedName(), plugin.TypedName())
+			}
+		}
+	}
+	return plugin, nil
 }
 
 // request is what the hooks remember about one routed LoRA request.
@@ -120,28 +121,22 @@ type Plugin struct {
 	typedName  fwkplugin.TypedName
 	baseModels map[string]bool
 	weights    lorascore.Weights
-	model      *residency.Model
+	cpuSlots   int
 	demand     *lorascore.Demand
 	now        func() time.Time
 
 	mu       sync.Mutex
 	requests map[string]*request // by RequestID
-	// endpoints is the endpoint object last added under each ID, so a stale
-	// delete for a replaced object can be told apart.
+	// endpoints is the endpoint object last added under each live ID. The
+	// runtime builds a fresh object for each add and dispatches a delete with
+	// the object it added, so a delete for a replaced object is told apart.
 	endpoints map[string]fwkdl.Endpoint
-	// deleted holds when each ID's delete event arrived, cleared by an add,
-	// so a scheduling cycle that raced the delete cannot recreate the pod.
-	deleted map[string]time.Time
-	// seq numbers endpoint objects; genSeq holds the number of each live
-	// ID's current object, which is also stamped on that object under
-	// generationKey. The director snapshots candidates before scoring and
-	// calls PreRequest after, so PreRequest compares the picked snapshot's
-	// stamp with genSeq and rejects an old generation.
-	seq    uint64
-	genSeq map[string]uint64
+	// pods is the estimate for each live ID.
+	pods map[string]*residency.Pod
 }
 
-// New validates p and returns a plugin named name.
+// New validates p and returns a plugin named name. p's weights are used as
+// given; start from DefaultParameters.
 func New(name string, p Parameters) (*Plugin, error) {
 	if len(p.BaseModels) == 0 {
 		return nil, errors.New(Type + ": baseModels is required")
@@ -161,19 +156,7 @@ func New(name string, p Parameters) (*Plugin, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", Type, err)
 	}
-	w := lorascore.DefaultWeights()
-	for _, o := range []struct {
-		src *float64
-		dst *float64
-	}{
-		{p.CopyCost, &w.CopyCost}, {p.LoadCost, &w.LoadCost}, {p.BlockedCost, &w.BlockedCost},
-		{p.PendingCost, &w.PendingCost}, {p.EvictionWeight, &w.EvictionWeight},
-	} {
-		if o.src != nil {
-			*o.dst = *o.src
-		}
-	}
-	if err := w.Validate(); err != nil {
+	if err := p.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", Type, err)
 	}
 	bases := make(map[string]bool, len(p.BaseModels))
@@ -183,14 +166,13 @@ func New(name string, p Parameters) (*Plugin, error) {
 	return &Plugin{
 		typedName:  fwkplugin.TypedName{Type: Type, Name: name},
 		baseModels: bases,
-		weights:    w,
-		model:      residency.NewModel(p.MaxCPULoras),
+		weights:    p.Weights,
+		cpuSlots:   p.MaxCPULoras,
 		demand:     demand,
 		now:        time.Now,
 		requests:   map[string]*request{},
 		endpoints:  map[string]fwkdl.Endpoint{},
-		deleted:    map[string]time.Time{},
-		genSeq:     map[string]uint64{},
+		pods:       map[string]*residency.Pod{},
 	}, nil
 }
 
@@ -200,7 +182,9 @@ func (s *Plugin) TypedName() fwkplugin.TypedName { return s.typedName }
 // Category returns the preference the scorer applies.
 func (s *Plugin) Category() fwksched.ScorerCategory { return fwksched.Affinity }
 
-// Consumes declares the per-pod LoRA metrics the scorer reads.
+// Consumes declares the per-pod LoRA metrics the scorer reads. MaxActiveModels
+// has no data key; the metrics extractor writes it with ActiveModels, from the
+// same metric.
 func (s *Plugin) Consumes() fwkplugin.DataDependencies {
 	return fwkplugin.DataDependencies{
 		Required: map[fwkplugin.DataKey]any{
@@ -209,18 +193,17 @@ func (s *Plugin) Consumes() fwkplugin.DataDependencies {
 	}
 }
 
-// Produces declares the generation stamp Extract writes. The scorer's data
-// scope hides undeclared keys and lets a producer read back its own, so this
-// declaration also keeps the stamp visible to Score.
-func (s *Plugin) Produces() map[fwkplugin.DataKey]any {
-	return map[fwkplugin.DataKey]any{generationKey: generation(0)}
-}
+// isBase reports whether model is scored and tracked as a base-model request.
+// An empty model names no adapter.
+func (s *Plugin) isBase(model string) bool { return model == "" || s.baseModels[model] }
 
-// Score refreshes each candidate's capacity and activity snapshot from its
+// Score refreshes each live candidate's capacity and activity snapshot from its
 // scraped metrics, then scores it by the estimated cost of serving the request.
-func (s *Plugin) Score(_ context.Context, req *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) map[fwksched.Endpoint]float64 {
+func (s *Plugin) Score(ctx context.Context, req *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) map[fwksched.Endpoint]float64 {
 	ids := make([]string, 0, len(endpoints))
 	byID := make(map[string]fwksched.Endpoint, len(endpoints))
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, ep := range endpoints {
 		id := endpointID(ep)
 		if id == "" {
@@ -228,24 +211,26 @@ func (s *Plugin) Score(_ context.Context, req *fwksched.InferenceRequest, endpoi
 		}
 		ids = append(ids, id)
 		byID[id] = ep
-		// A snapshot taken before a delete or a replacement can be scored
-		// after it; observing it would recreate an estimate for a deleted pod
-		// that nothing removes, or write the old object's metrics into the
-		// replacement's estimate.
-		if s.outdated(ep, id) {
+		// A snapshot taken before a delete can be scored after it; observing
+		// it would recreate an estimate that nothing removes.
+		if _, live := s.endpoints[id]; !live {
+			log.FromContext(ctx).V(logging.DEBUG).Info("Not observing a candidate with no live endpoint", "endpoint", id)
 			continue
 		}
 		if m := ep.GetMetrics(); m != nil {
-			s.model.ObserveCapacity(id, m.MaxActiveModels)
+			p := s.pod(id)
+			if m.MaxActiveModels > 0 { // 0 means unreported
+				p.SetCapacity(m.MaxActiveModels, s.cpuSlots)
+			}
 			// ActiveModels is running OR queued, so it protects, never touches.
-			s.model.ObserveActive(id, keys(m.ActiveModels))
+			p.ObserveActive(slices.Collect(maps.Keys(m.ActiveModels)))
 		}
 	}
-	adapter, isBase := "", true
+	adapter := ""
 	if req != nil {
-		adapter, isBase = req.TargetModel, s.baseModels[req.TargetModel]
+		adapter = req.TargetModel
 	}
-	scores := lorascore.Score(s.model, s.demand, adapter, isBase, ids, s.weights, s.now())
+	scores := lorascore.Score(s.pods, s.demand, adapter, s.isBase(adapter), ids, s.weights, s.now())
 	out := make(map[fwksched.Endpoint]float64, len(scores))
 	for id, v := range scores {
 		out[byID[id]] = v
@@ -254,23 +239,29 @@ func (s *Plugin) Score(_ context.Context, req *fwksched.InferenceRequest, endpoi
 }
 
 // PreRequest records the routed request against the pod finally picked.
-func (s *Plugin) PreRequest(_ context.Context, req *fwksched.InferenceRequest, result *fwksched.SchedulingResult) error {
-	if req == nil || req.RequestID == "" || s.baseModels[req.TargetModel] {
+func (s *Plugin) PreRequest(ctx context.Context, req *fwksched.InferenceRequest, result *fwksched.SchedulingResult) error {
+	if req == nil || req.RequestID == "" || s.isBase(req.TargetModel) {
 		return nil
 	}
-	picked := pickedEndpoint(result)
-	pod := endpointID(picked)
+	pod := endpointID(result.PrimaryEndpoint())
 	if pod == "" {
 		return nil
 	}
+	logger := log.FromContext(ctx)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, dup := s.requests[req.RequestID]; dup || s.tombstoned(pod) || s.staleSnapshot(picked, pod) {
+	if _, dup := s.requests[req.RequestID]; dup {
+		logger.V(logging.DEBUG).Info("Ignoring a repeated PreRequest", "requestId", req.RequestID)
+		return nil
+	}
+	if _, live := s.endpoints[pod]; !live {
+		logger.V(logging.DEBUG).Info("Not recording a route to a deleted endpoint", "requestId", req.RequestID, "endpoint", pod)
 		return nil
 	}
 	s.requests[req.RequestID] = &request{pod: pod, adapter: req.TargetModel}
-	s.model.Routed(pod, req.TargetModel)
+	s.pod(pod).Routed(req.TargetModel)
 	s.demand.Observe(req.TargetModel, s.now())
+	logger.V(logging.TRACE).Info("Routed", "requestId", req.RequestID, "endpoint", pod, "adapter", req.TargetModel)
 	return nil
 }
 
@@ -300,7 +291,7 @@ func (s *Plugin) ResponseHeader(_ context.Context, req *fwksched.InferenceReques
 // response or the server's cleanup for a request that exited before any body,
 // which carries a non-natural TerminationCause. Only the first ends naturally,
 // so only it counts as execution.
-func (s *Plugin) ResponseBody(_ context.Context, req *fwksched.InferenceRequest, resp *fwkrc.Response, _ *fwkdl.EndpointMetadata) {
+func (s *Plugin) ResponseBody(ctx context.Context, req *fwksched.InferenceRequest, resp *fwkrc.Response, _ *fwkdl.EndpointMetadata) {
 	if req == nil || resp == nil {
 		return
 	}
@@ -310,20 +301,25 @@ func (s *Plugin) ResponseBody(_ context.Context, req *fwksched.InferenceRequest,
 	if !ok {
 		return
 	}
+	logger := log.FromContext(ctx).V(logging.TRACE)
 	now := s.now()
 	firstChunk := resp.StartOfStream &&
 		(!resp.EndOfStream || resp.TerminationCause == fwkrc.TerminationCauseNatural)
 	if firstChunk && !r.started && !r.errorStatus {
 		r.started = true
-		s.model.Started(r.pod, r.adapter, now)
+		s.pod(r.pod).Started(r.adapter, now)
+		logger.Info("Started", "requestId", req.RequestID, "endpoint", r.pod, "adapter", r.adapter)
 	}
 	if resp.EndOfStream {
-		s.model.Finished(r.pod, r.adapter, now, r.started)
+		s.pod(r.pod).Finished(r.adapter, now, r.started)
 		delete(s.requests, req.RequestID)
+		logger.Info("Finished", "requestId", req.RequestID, "endpoint", r.pod, "adapter", r.adapter, "started", r.started)
 	}
 }
 
 // RegisterDependencies subscribes the plugin to endpoint lifecycle events.
+// The default source registers the endpoint-notification datalayer source
+// when the configuration does not declare one.
 func (s *Plugin) RegisterDependencies(r fwkdl.Registrar) error {
 	return r.Register(fwkdl.PendingRegistration{
 		Owner:      s.TypedName(),
@@ -334,79 +330,49 @@ func (s *Plugin) RegisterDependencies(r fwkdl.Registrar) error {
 	})
 }
 
-// Extract tracks endpoint lifecycle by endpoint object, which is the
-// generation: Runtime.NewEndpoint builds a fresh object for each add and
-// Runtime.UpdateEndpoint re-dispatches the existing one. A delete forgets the pod's estimate and every request record on
-// it, and tombstones the ID until it is added again, so late callbacks cannot
-// recreate state that a pod recreated under the same name would inherit. An
-// add carrying a different object under a known ID starts a new generation the
-// same way, since the old object's delete may arrive later and is then ignored
-// as stale.
-func (s *Plugin) Extract(_ context.Context, event fwkdl.EndpointEvent) error {
+// Extract tracks endpoint lifecycle by endpoint object. Runtime.NewEndpoint
+// builds a fresh object for each add, and Runtime.UpdateEndpoint re-dispatches
+// the existing one. An add carrying a different object under an ID, or a
+// delete, forgets the pod's estimate and every request record on it, so a pod
+// recreated under the same name starts empty. A delete for an object already
+// replaced is ignored.
+func (s *Plugin) Extract(ctx context.Context, event fwkdl.EndpointEvent) error {
 	if event.Endpoint == nil || event.Endpoint.GetMetadata() == nil {
 		return nil
 	}
 	id := event.Endpoint.GetMetadata().ID.String()
+	logger := log.FromContext(ctx)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	cur, known := s.endpoints[id]
 	switch event.Type {
 	case fwkdl.EventAddOrUpdate:
-		if cur, known := s.endpoints[id]; !known || cur != event.Endpoint {
-			// A new object is a new pod: nothing under this ID before it,
-			// from an older generation or from before its first add, applies.
+		if !known || cur != event.Endpoint {
 			s.forget(id)
-			s.seq++
-			s.genSeq[id] = s.seq
-			event.Endpoint.GetAttributes().Put(generationKey, generation(s.seq))
+			logger.V(logging.TRACE).Info("Tracking a new endpoint", "endpoint", id, "replaced", known)
 		}
 		s.endpoints[id] = event.Endpoint
-		delete(s.deleted, id)
 	case fwkdl.EventDelete:
-		if cur, ok := s.endpoints[id]; ok && cur != event.Endpoint {
+		if known && cur != event.Endpoint {
+			logger.V(logging.DEBUG).Info("Ignoring a stale delete for a replaced endpoint", "endpoint", id)
 			return nil
 		}
 		delete(s.endpoints, id)
-		now := s.now()
-		for d, at := range s.deleted {
-			if now.Sub(at) >= tombstoneTTL {
-				delete(s.deleted, d)
-			}
-		}
-		s.deleted[id] = now
-		delete(s.genSeq, id)
 		s.forget(id)
+		logger.V(logging.TRACE).Info("Forgot a deleted endpoint", "endpoint", id)
 	}
 	return nil
 }
 
-// staleSnapshot reports whether the picked snapshot endpoint was cloned from an
-// endpoint object other than pod's current one: its stamp differs from the
-// current generation, or the pod has none (deleted). An endpoint without a
-// stamp (added before this plugin saw it) cannot be checked and is accepted.
-// Callers hold s.mu.
-func (s *Plugin) staleSnapshot(picked fwksched.Endpoint, pod string) bool {
-	v, ok := picked.Get(generationKey)
+// pod returns id's estimate, creating it with one GPU slot until the pod
+// reports max_lora. Callers hold s.mu.
+func (s *Plugin) pod(id string) *residency.Pod {
+	p, ok := s.pods[id]
 	if !ok {
-		return false
+		p = residency.NewPod(1, s.cpuSlots)
+		s.pods[id] = p
 	}
-	g, ok := v.(generation)
-	cur, live := s.genSeq[pod]
-	return !ok || !live || uint64(g) != cur
-}
-
-// outdated reports, for callers not holding s.mu, whether a snapshot endpoint
-// belongs to a deleted pod or to an endpoint object since replaced.
-func (s *Plugin) outdated(ep fwksched.Endpoint, id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.tombstoned(id) || s.staleSnapshot(ep, id)
-}
-
-// tombstoned reports whether id was deleted within tombstoneTTL and not added
-// since. Callers hold s.mu.
-func (s *Plugin) tombstoned(id string) bool {
-	at, ok := s.deleted[id]
-	return ok && s.now().Sub(at) < tombstoneTTL
+	return p
 }
 
 // forget drops pod id's estimate and every request record on it. Callers hold
@@ -417,18 +383,7 @@ func (s *Plugin) forget(id string) {
 			delete(s.requests, rid)
 		}
 	}
-	s.model.Delete(id)
-}
-
-func pickedEndpoint(result *fwksched.SchedulingResult) fwksched.Endpoint {
-	if result == nil {
-		return nil
-	}
-	pr := result.ProfileResults[result.PrimaryProfileName]
-	if pr == nil || len(pr.TargetEndpoints) == 0 {
-		return nil
-	}
-	return pr.TargetEndpoints[0]
+	delete(s.pods, id)
 }
 
 func endpointID(ep fwksched.Endpoint) string {
@@ -436,12 +391,4 @@ func endpointID(ep fwksched.Endpoint) string {
 		return ""
 	}
 	return ep.GetMetadata().ID.String()
-}
-
-func keys(m map[string]int) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
 }
