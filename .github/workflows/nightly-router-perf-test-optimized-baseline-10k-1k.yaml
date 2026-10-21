@@ -166,7 +166,8 @@ jobs:
       - name: Open or update the trend issue
         if: hashFiles('trend-output/trend-issue.md') != ''
         run: |
-          marker="<!-- perf-trend:${TEST_NAME} -->"
+          # trend.py writes the issue marker as the first line of the body.
+          marker=$(head -n 1 trend-output/trend-issue.md)
           number=$(gh issue list --repo "$REPO" --state open --label kind/performance --limit 200 --json number,body |
             jq -r --arg marker "$marker" '[.[] | select((.body // "") | contains($marker))][0].number // empty')
           if [ -n "$number" ]; then

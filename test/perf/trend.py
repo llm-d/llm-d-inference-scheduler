@@ -52,7 +52,7 @@ def load_records(results_dir, test_name):
     if not os.path.isdir(runs_dir):
         return []
     records = []
-    for name in sorted(os.listdir(runs_dir)):
+    for name in os.listdir(runs_dir):
         if name.endswith(".json"):
             records.append(load_record(os.path.join(runs_dir, name)))
     return sorted(records, key=lambda record: parse_time(record["started_at"]))
@@ -126,7 +126,7 @@ def compare(baseline_records, candidate, threshold=THRESHOLD, min_runs=MIN_BASEL
 
 
 def commit_of(record):
-    return (record or {}).get("provenance", {}).get("epp_commit") or None
+    return record.get("provenance", {}).get("epp_commit") or None
 
 
 def evaluate(records, test_name, threshold=THRESHOLD, window_days=WINDOW_DAYS, min_runs=MIN_BASELINE_RUNS):
@@ -253,9 +253,6 @@ def parse_args(argv):
     parser.add_argument("--output-dir", required=True, help="Folder for trend-summary.md, trend-verdict.json and trend-issue.md")
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", DEFAULT_REPOSITORY), help="owner/name used for compare links")
     parser.add_argument("--run-url", default=None, help="Workflow run URL to link from the issue")
-    parser.add_argument("--threshold", type=float, default=THRESHOLD, help="Relative degradation that counts as a regression")
-    parser.add_argument("--window-days", type=int, default=WINDOW_DAYS, help="Days of history in the baseline")
-    parser.add_argument("--min-baseline-runs", type=int, default=MIN_BASELINE_RUNS, help="Comparable runs required before comparing")
     return parser.parse_args(argv)
 
 
@@ -263,7 +260,7 @@ def main(argv=None):
     # A regression exits 0; an error in this script propagates and fails the step.
     args = parse_args(argv)
     records = load_records(args.results_dir, args.test_name)
-    verdict = evaluate(records, args.test_name, args.threshold, args.window_days, args.min_baseline_runs)
+    verdict = evaluate(records, args.test_name)
     print(write_outputs(verdict, args.output_dir, args.repository, args.run_url))
     return 0
 
