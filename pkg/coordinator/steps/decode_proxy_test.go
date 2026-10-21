@@ -77,6 +77,34 @@ func TestNewDecodeProxyRequest_OmitsPeerTopologyWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestNewDecodeProxyRequest_PreferComesFromTheStepOnly verifies that a
+// client-supplied Prefer header is not forwarded on a decode-phase request,
+// while the conditional cache probe still sets its own.
+func TestNewDecodeProxyRequest_PreferComesFromTheStepOnly(t *testing.T) {
+	gwClient := gateway.New(config.GatewayConfig{Address: "http://example.invalid"})
+	reqCtx := &pipeline.RequestContext{
+		RequestID:       "req-1",
+		OriginalPath:    "/v1/chat/completions",
+		OriginalHeaders: http.Header{"Prefer": {"if-available"}},
+	}
+
+	req, err := newDecodeProxyRequest(context.Background(), logr.Discard(), "decode", reqCtx, gwClient, map[string]any{}, nil)
+	if err != nil {
+		t.Fatalf("newDecodeProxyRequest: %v", err)
+	}
+	if got := req.Header.Get("Prefer"); got != "" {
+		t.Fatalf("client-supplied Prefer reached the decode request: %q", got)
+	}
+
+	probe, err := newDecodeProxyRequest(context.Background(), logr.Discard(), ConditionalDecodeStepName, reqCtx, gwClient, map[string]any{}, map[string]string{"Prefer": "if-available"})
+	if err != nil {
+		t.Fatalf("newDecodeProxyRequest: %v", err)
+	}
+	if got := probe.Header.Get("Prefer"); got != "if-available" {
+		t.Fatalf("conditional probe Prefer = %q, want if-available", got)
+	}
+}
+
 // TestNewDecodeProxy_StripsPeerTopologyFromClientResponse verifies that
 // x-llm-d-peer-topology never reaches the client, even if a decode profile's
 // response carries it (e.g. topology-stamp-handler misconfigured on decode
