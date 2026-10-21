@@ -156,7 +156,7 @@ func (s *Server) startHTTP(ctx context.Context) error {
 func (s *Server) createDecoderProxyHandler(decoderURL *url.URL, decoderInsecureSkipVerify bool) *httputil.ReverseProxy {
 	decoderProxy := httputil.NewSingleHostReverseProxy(decoderURL)
 	decoderProxy.Transport = s.newProxyTransport(decoderURL.Scheme, decoderInsecureSkipVerify)
-	decoderProxy.ErrorHandler = func(res http.ResponseWriter, _ *http.Request, err error) {
+	decoderProxy.ErrorHandler = func(res http.ResponseWriter, req *http.Request, err error) {
 
 		// Log errors from the decoder proxy
 		var writeError error
@@ -164,14 +164,13 @@ func (s *Server) createDecoderProxyHandler(decoderURL *url.URL, decoderInsecureS
 		case errors.Is(err, syscall.ECONNREFUSED):
 			s.logger.Error(err, "failed to connect to vLLM decoder",
 				"decoderURL", s.config.DecoderURL.String())
-			res.Header().Set("Content-Type", "application/json")
-			res.WriteHeader(http.StatusServiceUnavailable)
-			_, writeError = res.Write(decoderServiceUnavailableResponseJSON)
+			writeError = sendError(res, req, http.StatusServiceUnavailable,
+				"The decode node is not ready. Please check that the vLLM service is running and the port configuration is correct.")
 
 		default:
 			s.logger.Error(err, "http: proxy error",
 				"decoderURL", s.config.DecoderURL.String())
-			writeError = errorBadGateway(err, res)
+			writeError = errorBadGateway(res, req, err)
 		}
 		if writeError != nil {
 			s.logger.Error(err, "failed to send error response to client")
@@ -265,7 +264,7 @@ func (s *Server) readJSONBody(r *http.Request, w http.ResponseWriter) ([]byte, m
 	raw, parsed, err := bodyAsJSON(r)
 	if err != nil {
 		s.logger.V(logging.DEBUG).Info("invalid request body", "error", err)
-		if writeErr := errorJSONInvalid(err, w); writeErr != nil {
+		if writeErr := errorJSONInvalid(w, r, err); writeErr != nil {
 			s.logger.Error(writeErr, "failed to send error response to client")
 		}
 		return nil, nil, false
@@ -277,7 +276,7 @@ func (s *Server) readJSONBody(r *http.Request, w http.ResponseWriter) ([]byte, m
 	if reqcommon.DetectAPIType(r.URL.Path) == reqcommon.APITypeResponses {
 		if err := reqcommon.RejectStatefulResponsesFields(parsed); err != nil {
 			s.logger.Info("rejecting unsupported responses field", "error", err, "path", r.URL.Path)
-			if writeErr := errorJSONInvalid(err, w); writeErr != nil {
+			if writeErr := errorJSONInvalid(w, r, err); writeErr != nil {
 				s.logger.Error(writeErr, "failed to send error response to client")
 			}
 			return nil, nil, false
