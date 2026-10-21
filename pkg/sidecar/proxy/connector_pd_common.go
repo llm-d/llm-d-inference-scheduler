@@ -137,6 +137,7 @@ func (s *Server) runConcurrentPD(
 	decodeDuration := time.Since(decodeStart)
 	metrics.RecordDecodeDuration(decodeDuration)
 	if decodeStatus.failed() {
+		cancelPrefill()
 		metrics.RecordError(metrics.StageDecode)
 		decodeSpan.SetStatus(codes.Error, "decode request failed")
 	}

@@ -20,9 +20,11 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"syscall"
 	"testing"
 	"time"
 
@@ -42,6 +44,8 @@ func TestConcurrentPDCancellation(t *testing.T) {
 		prefillStatus int
 		// decode runs on the decode server once prefill has started.
 		decode              func(w http.ResponseWriter, r *http.Request, cancelClient context.CancelFunc)
+		decodeConnRefused   bool
+		wantDecodeStatus    int
 		wantPrefillCanceled bool
 	}{
 		{
@@ -50,6 +54,20 @@ func TestConcurrentPDCancellation(t *testing.T) {
 			decode: func(_ http.ResponseWriter, r *http.Request, _ context.CancelFunc) {
 				<-r.Context().Done()
 			},
+		},
+		{
+			name:                "decode connection refusal cancels prefill",
+			decodeConnRefused:   true,
+			wantDecodeStatus:    http.StatusServiceUnavailable,
+			wantPrefillCanceled: true,
+		},
+		{
+			name: "decode failure cancels prefill",
+			decode: func(w http.ResponseWriter, _ *http.Request, _ context.CancelFunc) {
+				w.WriteHeader(http.StatusInternalServerError)
+			},
+			wantDecodeStatus:    http.StatusInternalServerError,
+			wantPrefillCanceled: true,
 		},
 		{
 			name: "client disconnect cancels prefill",
@@ -109,12 +127,29 @@ func TestConcurrentPDCancellation(t *testing.T) {
 			decodeURL, err := url.Parse(decode.URL)
 			require.NoError(t, err)
 			s := NewProxy(Config{Port: "0", DecoderURL: decodeURL})
-			s.decoderProxy = s.createDecoderProxyHandler(decodeURL, false)
+			decoderProxy := s.createDecoderProxyHandler(decodeURL, false)
+			if tt.decodeConnRefused {
+				decoderProxy.Transport = &http.Transport{
+					DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+						select {
+						case <-prefillStarted:
+							return nil, syscall.ECONNREFUSED
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
+					},
+				}
+			}
+			s.decoderProxy = decoderProxy
 
 			body := []byte(`{"input_ids":[1]}`)
 			req := httptest.NewRequest(http.MethodPost, reqcommon.PathSGLangGenerate, bytes.NewReader(body)).WithContext(ctx)
-			s.runConcurrentPD(httptest.NewRecorder(), req, body, body, prefillURL.Host, constants.KVConnectorSGLang, nil)
+			response := httptest.NewRecorder()
+			s.runConcurrentPD(response, req, body, body, prefillURL.Host, constants.KVConnectorSGLang, nil)
 			require.NotErrorIs(t, ctx.Err(), context.DeadlineExceeded, "decode must not wait for the client deadline")
+			if tt.wantDecodeStatus != 0 {
+				require.Equal(t, tt.wantDecodeStatus, response.Code)
+			}
 
 			// net/http cancels the request context after the handler returns.
 			cancel()
@@ -122,7 +157,7 @@ func TestConcurrentPDCancellation(t *testing.T) {
 				select {
 				case <-prefillCanceled:
 				case <-time.After(time.Second):
-					t.Fatal("client cancellation did not reach prefill")
+					t.Fatal("prefill request was not canceled")
 				}
 				return
 			}

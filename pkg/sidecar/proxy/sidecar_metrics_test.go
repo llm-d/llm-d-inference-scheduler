@@ -290,20 +290,30 @@ func TestRunConcurrentPDMetrics(t *testing.T) {
 			name:      "decode 500 records decode error and duration",
 			decoder:   statusHandler(http.StatusInternalServerError, `{"error":"boom"}`),
 			client:    func() http.ResponseWriter { return httptest.NewRecorder() },
-			wantDelta: stageMetrics{decodeCount: 1, decodeErrors: 1},
+			wantDelta: stageMetrics{decodeCount: 1, prefillErrors: 1, decodeErrors: 1},
 		},
 		{
 			name:      "client write failure records decode error",
 			decoder:   statusHandler(http.StatusOK, `{"choices":[]}`),
 			client:    func() http.ResponseWriter { return errWriter{} },
-			wantDelta: stageMetrics{decodeCount: 1, decodeErrors: 1},
+			wantDelta: stageMetrics{decodeCount: 1, prefillErrors: 1, decodeErrors: 1},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prefill := httptest.NewServer(statusHandler(http.StatusOK, `{}`))
-			defer prefill.Close()
+			prefill := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tt.wantDelta.prefillErrors != 0 {
+					_, _ = io.Copy(io.Discard, r.Body)
+					select {
+					case <-r.Context().Done():
+					case <-t.Context().Done():
+					}
+					return
+				}
+				statusHandler(http.StatusOK, `{}`).ServeHTTP(w, r)
+			}))
+			t.Cleanup(prefill.Close)
 			prefillURL, err := url.Parse(prefill.URL)
 			require.NoError(t, err)
 
@@ -319,7 +329,8 @@ func TestRunConcurrentPDMetrics(t *testing.T) {
 			// Prefill runs in a goroutine; wait for its sample so it cannot leak
 			// into a later test's delta.
 			require.Eventually(t, func() bool {
-				return snapshotStageMetrics(t).delta(before).prefillCount == 1
+				delta := snapshotStageMetrics(t).delta(before)
+				return delta.prefillCount == 1 && delta.prefillErrors == tt.wantDelta.prefillErrors
 			}, 5*time.Second, 10*time.Millisecond)
 
 			want := tt.wantDelta
