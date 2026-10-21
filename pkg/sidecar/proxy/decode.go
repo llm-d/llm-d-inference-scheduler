@@ -41,9 +41,13 @@ const (
 
 	requestFieldN = "n"
 
-	responseFieldMessage = "message"
-	responseFieldIndex   = "index"
-	responseFieldDelta   = "delta"
+	responseFieldMessage          = "message"
+	responseFieldIndex            = "index"
+	responseFieldDelta            = "delta"
+	responseFieldToolCalls        = "tool_calls"
+	responseFieldLogprobs         = "logprobs"
+	responseFieldReasoning        = "reasoning"
+	responseFieldReasoningContent = "reasoning_content"
 
 	roleAssistant = "assistant"
 )
@@ -404,7 +408,9 @@ func extractFinishReason(response map[string]any) string {
 }
 
 // emitSSEChunk writes one SSE data event to w, converting a buffered
-// non-streaming response into a streaming delta event (chat or legacy).
+// non-streaming response into a streaming delta event. The delta carries
+// the message's content, reasoning and tool calls, and the choice's logprobs
+// pass through, so a streaming client receives what the decoder returned.
 func emitSSEChunk(w http.ResponseWriter, chunkResponse map[string]any) error {
 	streamChunk := maps.Clone(chunkResponse)
 
@@ -415,12 +421,14 @@ func emitSSEChunk(w http.ResponseWriter, chunkResponse map[string]any) error {
 			if !ok {
 				continue
 			}
-			text := extractChoiceText(choice)
 			streamChoice := map[string]any{
 				responseFieldIndex:        choice[responseFieldIndex],
 				responseFieldFinishReason: choice[responseFieldFinishReason],
+				responseFieldDelta:        deltaFromChoice(choice),
 			}
-			streamChoice[responseFieldDelta] = map[string]any{reqcommon.FieldContent: text, reqcommon.FieldRole: roleAssistant}
+			if logprobs, ok := choice[responseFieldLogprobs]; ok && logprobs != nil {
+				streamChoice[responseFieldLogprobs] = logprobs
+			}
 			streamChoices = append(streamChoices, streamChoice)
 		}
 		streamChunk[responseFieldChoices] = streamChoices
@@ -434,6 +442,35 @@ func emitSSEChunk(w http.ResponseWriter, chunkResponse map[string]any) error {
 	}
 	_, err = fmt.Fprintf(w, "%s%s\n\n", reqcommon.SSEDataPrefix, data)
 	return err
+}
+
+// deltaFromChoice builds the streaming delta of a choice from its message.
+// Tool calls are numbered with the index a streaming client aggregates on,
+// which the non-streaming shape does not carry.
+func deltaFromChoice(choice map[string]any) map[string]any {
+	delta := map[string]any{reqcommon.FieldContent: extractChoiceText(choice), reqcommon.FieldRole: roleAssistant}
+	msg, _ := choice[responseFieldMessage].(map[string]any)
+	for _, field := range []string{responseFieldReasoning, responseFieldReasoningContent} {
+		if v, ok := msg[field]; ok && v != nil {
+			delta[field] = v
+		}
+	}
+	calls, _ := msg[responseFieldToolCalls].([]any)
+	if len(calls) == 0 {
+		return delta
+	}
+	indexed := make([]any, 0, len(calls))
+	for i, call := range calls {
+		m, ok := call.(map[string]any)
+		if !ok {
+			continue
+		}
+		m = maps.Clone(m)
+		m[responseFieldIndex] = i
+		indexed = append(indexed, m)
+	}
+	delta[responseFieldToolCalls] = indexed
+	return delta
 }
 
 // firstChoice returns choices[0] from a response map, or nil.
