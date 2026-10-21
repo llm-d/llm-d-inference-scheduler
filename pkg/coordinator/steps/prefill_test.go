@@ -19,6 +19,7 @@ package steps
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
@@ -282,6 +284,36 @@ func TestPrefillStep_CompletionsFormat_NoRenderedTokens(t *testing.T) {
 
 	if prefillBody["prompt"] != "Hello" {
 		t.Fatalf("expected original prompt to pass through, got %v", prefillBody["prompt"])
+	}
+}
+
+// A declared Content-Length longer than the 503 body cuts the TRACE pre-read
+// short; the step must still report the 503.
+func TestPrefillStep_UpstreamStatusSurvivesInterruptedTraceRead(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"error":"overloaded`)
+	}))
+	defer server.Close()
+
+	step, err := NewPrefillStep(gateway.New(config.GatewayConfig{Address: server.URL}), map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqCtx := &pipeline.RequestContext{
+		RequestID:        "req-trace",
+		OriginalPath:     reqcommon.PathCompletions,
+		Model:            "test-model",
+		Body:             map[string]any{"prompt": "Hello"},
+		KVTransferParams: make(map[string]any),
+	}
+
+	logger := funcr.NewJSON(func(string) {}, funcr.Options{Verbosity: logutil.TRACE})
+	err = step.Execute(log.IntoContext(context.Background(), logger), reqCtx)
+	var upstream *pipeline.UpstreamError
+	if !errors.As(err, &upstream) || upstream.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected UpstreamError 503, got %v", err)
 	}
 }
 

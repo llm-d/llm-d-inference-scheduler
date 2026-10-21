@@ -294,6 +294,10 @@ func (r *Runner) Run(ctx context.Context) error {
 	if dlCfg != nil && dlCfg.Discovery != nil && dlCfg.Discovery.Endpoints != nil {
 		return r.runWithFileDiscovery(ctx, opts, rawConfig)
 	}
+	if err := validateKubernetesDiscoveryFlags(opts); err != nil {
+		setupLog.Error(err, "Failed to validate flags")
+		return err
+	}
 
 	r.servingCtx, r.cancelServing = context.WithCancel(context.WithoutCancel(ctx))
 	defer r.cancelServing()
@@ -982,6 +986,18 @@ func extractDeploymentName(podName string) (string, error) {
 		return matches[1], nil
 	}
 	return "", fmt.Errorf("failed to parse deployment name from pod name %s", podName)
+}
+
+// validateKubernetesDiscoveryFlags checks the flags the Kubernetes discovery path
+// needs: an InferencePool name or an endpoint selector, but not both.
+func validateKubernetesDiscoveryFlags(opts *runserver.Options) error {
+	if opts.PoolName != "" && opts.EndpointSelector != nil {
+		return errors.New("pool-name and endpoint-selector cannot both be set")
+	}
+	if opts.PoolName == "" && opts.EndpointSelector == nil {
+		return errors.New("either pool-name or endpoint-selector must be set")
+	}
+	return nil
 }
 
 func extractGKNN(poolName, poolGroup, poolNamespace string, endpointSelector labels.Selector) (*common.GKNN, error) {

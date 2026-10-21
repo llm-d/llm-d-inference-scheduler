@@ -75,14 +75,137 @@ func TestResponsesPayloadWire_ComplexInputItemsFailClosed(t *testing.T) {
 	r := &fwkrh.ResponsesRequest{
 		Input: []any{
 			map[string]any{"role": "user", "content": "before"},
-			map[string]any{"type": "function_call", "call_id": "call_1", "name": "run", "arguments": "{}"},
-			map[string]any{"type": "reasoning", "content": "thinking..."},
+			map[string]any{"type": "web_search_call", "id": "ws_1", "status": "completed"},
 			map[string]any{"role": "user", "content": "after"},
 		},
 	}
 	_, err := responsesPayload(r)
-	assert.ErrorContains(t, err, `"function_call"`)
+	assert.ErrorContains(t, err, `"web_search_call"`)
 	assert.ErrorContains(t, err, "not supported")
+}
+
+// TestResponsesPayloadWire_ToolCallTurn covers the second turn of a
+// tool-calling loop as the OpenAI SDK sends it: the function_call becomes an
+// assistant message carrying tool_calls, and the function_call_output the
+// tool message answering it.
+func TestResponsesPayloadWire_ToolCallTurn(t *testing.T) {
+	r := &fwkrh.ResponsesRequest{
+		Input: []any{
+			map[string]any{"role": "user", "content": "what is the weather"},
+			map[string]any{"type": "function_call", "call_id": "call_1", "name": "get_weather", "arguments": `{"city":"Paris"}`},
+			map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "sunny"},
+		},
+	}
+	got, err := responsesPayload(r)
+	require.NoError(t, err)
+	body, err := got.Marshal()
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"messages":[
+		{"role":"user","content":"what is the weather"},
+		{"role":"assistant","tool_calls":[
+			{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}
+		]},
+		{"role":"tool","content":"sunny","tool_call_id":"call_1"}
+	]}`, string(body))
+}
+
+// TestResponsesPayloadWire_AssistantTurnFolds covers a turn spelled as
+// reasoning, message and two function_call items, followed by both outputs:
+// vLLM renders the four items as one assistant message, so the translation
+// folds them the same way, and an output given as content parts converts
+// like message content.
+func TestResponsesPayloadWire_AssistantTurnFolds(t *testing.T) {
+	r := &fwkrh.ResponsesRequest{
+		Input: []any{
+			map[string]any{"role": "user", "content": "plan a trip"},
+			map[string]any{"type": "reasoning", "id": "rs_1", "summary": []any{
+				map[string]any{"type": "summary_text", "text": "compare two cities"},
+			}},
+			map[string]any{"type": "message", "role": "assistant", "content": []any{
+				map[string]any{"type": "output_text", "text": "Checking both."},
+			}},
+			map[string]any{"type": "function_call", "call_id": "call_1", "name": "get_weather", "arguments": `{"city":"Paris"}`},
+			map[string]any{"type": "function_call", "call_id": "call_2", "name": "get_weather", "arguments": `{"city":"Rome"}`},
+			map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "sunny"},
+			map[string]any{"type": "function_call_output", "call_id": "call_2", "output": []any{
+				map[string]any{"type": "input_text", "text": "rain"},
+			}},
+		},
+	}
+	got, err := responsesPayload(r)
+	require.NoError(t, err)
+	body, err := got.Marshal()
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"messages":[
+		{"role":"user","content":"plan a trip"},
+		{"role":"assistant","reasoning":"compare two cities","content":"Checking both.","tool_calls":[
+			{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}},
+			{"id":"call_2","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Rome\"}"}}
+		]},
+		{"role":"tool","content":"sunny","tool_call_id":"call_1"},
+		{"role":"tool","content":"rain","tool_call_id":"call_2"}
+	]}`, string(body))
+}
+
+// TestResponsesPayloadWire_ReasoningPlacement covers the two reasoning
+// rules: a content part wins over a summary part, and a reasoning item that
+// follows an assistant message already carrying reasoning starts a new
+// assistant message instead of overwriting it.
+func TestResponsesPayloadWire_ReasoningPlacement(t *testing.T) {
+	r := &fwkrh.ResponsesRequest{
+		Input: []any{
+			map[string]any{"role": "user", "content": "q"},
+			map[string]any{"type": "reasoning", "id": "rs_1",
+				"content": []any{map[string]any{"type": "reasoning_text", "text": "full thought"}},
+				"summary": []any{map[string]any{"type": "summary_text", "text": "short"}},
+			},
+			map[string]any{"type": "message", "role": "assistant", "content": "a"},
+			map[string]any{"type": "reasoning", "id": "rs_2", "summary": []any{
+				map[string]any{"type": "summary_text", "text": "second thought"},
+			}},
+			map[string]any{"type": "function_call", "call_id": "call_1", "name": "run", "arguments": "{}"},
+		},
+	}
+	got, err := responsesPayload(r)
+	require.NoError(t, err)
+	body, err := got.Marshal()
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"messages":[
+		{"role":"user","content":"q"},
+		{"role":"assistant","reasoning":"full thought","content":"a"},
+		{"role":"assistant","reasoning":"second thought","tool_calls":[
+			{"id":"call_1","type":"function","function":{"name":"run","arguments":"{}"}}
+		]}
+	]}`, string(body))
+}
+
+// TestResponsesPayloadWire_ItemsFailClosed covers the item shapes the
+// translation refuses: a function_call missing a required field or carrying
+// a namespace, a reasoning item with encrypted content, an output without
+// its call_id, and an item type this code does not know.
+func TestResponsesPayloadWire_ItemsFailClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		item map[string]any
+		want string
+	}{
+		{"function_call without arguments", map[string]any{"type": "function_call", "call_id": "call_1", "name": "run"}, "needs call_id, name and arguments"},
+		{"function_call without name", map[string]any{"type": "function_call", "call_id": "call_1", "arguments": "{}"}, "needs call_id, name and arguments"},
+		{"namespaced function_call", map[string]any{"type": "function_call", "call_id": "call_1", "name": "run", "arguments": "{}", "namespace": "ns"}, "namespace"},
+		{"encrypted reasoning", map[string]any{"type": "reasoning", "id": "rs_1", "encrypted_content": "gAAAA"}, "encrypted_content"},
+		{"reasoning part without text", map[string]any{"type": "reasoning", "id": "rs_1", "summary": []any{map[string]any{"type": "summary_text"}}}, "has no text field"},
+		{"function_call_output without call_id", map[string]any{"type": "function_call_output", "output": "sunny"}, "has no call_id"},
+		{"function_call_output with an audio part", map[string]any{"type": "function_call_output", "call_id": "call_1", "output": []any{map[string]any{"type": "input_audio"}}}, `"input_audio"`},
+		{"unknown item type", map[string]any{"type": "web_search_call", "id": "ws_1"}, `"web_search_call"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := responsesPayload(&fwkrh.ResponsesRequest{Input: []any{
+				map[string]any{"role": "user", "content": "q"},
+				tc.item,
+			}})
+			assert.ErrorContains(t, err, tc.want)
+		})
+	}
 }
 
 func TestResponsesPayloadWire_ArrayContentTextParts(t *testing.T) {
@@ -304,7 +427,7 @@ func TestProduce_ResponsesUnsupportedInputErrors(t *testing.T) {
 	req := &scheduling.InferenceRequest{
 		Body: &fwkrh.InferenceRequestBody{
 			Responses: &fwkrh.ResponsesRequest{
-				Input: []any{map[string]any{"type": "function_call", "call_id": "call_1"}},
+				Input: []any{map[string]any{"type": "web_search_call", "id": "ws_1"}},
 			},
 			Payload: fwkrh.PayloadMap{},
 		},
@@ -314,7 +437,7 @@ func TestProduce_ResponsesUnsupportedInputErrors(t *testing.T) {
 	// caller can tell tokenization was skipped rather than run successfully.
 	err := p.Produce(context.Background(), req, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `"function_call"`)
+	assert.Contains(t, err.Error(), `"web_search_call"`)
 	assert.Nil(t, req.Body.TokenizedRequest)
 }
 
