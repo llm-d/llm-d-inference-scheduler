@@ -465,7 +465,11 @@ func (r *Runner) setup(ctx, servingCtx context.Context, cfg *rest.Config, opts *
 	// --- Setup Metrics Server ---
 	metricsutil.SetFairnessIDLabelLimit(opts.FairnessIDMetricLabelLimit)
 	r.customCollectors = append(r.customCollectors, collectors.NewInferencePoolMetricsCollector(ds))
-	metrics.Register(r.customCollectors...)
+	registerOpts, err := metricsRegisterOptions(rawConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+	metrics.RegisterWithOptions(registerOpts, r.customCollectors...)
 	metrics.RecordInferenceExtensionInfo(version.CommitSHA, version.BuildRef)
 	// Register metrics handler.
 	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
@@ -587,6 +591,32 @@ func (r *Runner) setup(ctx, servingCtx context.Context, cfg *rest.Config, opts *
 
 // newMetricsServerOptions configures the EPP metrics server. OpenMetrics is
 // enabled because exemplars only exist in that format.
+// metricsRegisterOptions maps the configuration file's metrics section onto the
+// metrics package. Both discovery paths call it with the same parsed config so
+// custom histogram buckets apply identically, and both call it before
+// registration because the histograms are built there and are process-wide.
+// Invalid edges fail startup rather than silently falling back to the defaults.
+func metricsRegisterOptions(rawConfig *configapiv1.EndpointPickerConfig) (metrics.RegisterOptions, error) {
+	if rawConfig == nil || rawConfig.Metrics == nil {
+		return metrics.RegisterOptions{}, nil
+	}
+	for field, edges := range map[string][]float64{
+		"requestTPOTBuckets": rawConfig.Metrics.RequestTPOTBuckets,
+		"requestITLBuckets":  rawConfig.Metrics.RequestITLBuckets,
+	} {
+		if edges == nil {
+			continue
+		}
+		if err := metrics.ValidateHistogramBuckets(edges); err != nil {
+			return metrics.RegisterOptions{}, fmt.Errorf("metrics.%s: %w", field, err)
+		}
+	}
+	return metrics.RegisterOptions{
+		RequestTPOTBuckets: rawConfig.Metrics.RequestTPOTBuckets,
+		RequestITLBuckets:  rawConfig.Metrics.RequestITLBuckets,
+	}, nil
+}
+
 func newMetricsServerOptions(port uint16, authEnabled bool) metricsserver.Options {
 	opts := metricsserver.Options{
 		BindAddress: fmt.Sprintf(":%d", port),
@@ -1293,7 +1323,11 @@ func (r *Runner) runWithFileDiscovery(ctx context.Context, opts *runserver.Optio
 	}
 
 	r.customCollectors = append(r.customCollectors, collectors.NewInferencePoolMetricsCollector(ds))
-	metrics.Register(r.customCollectors...)
+	registerOpts, err := metricsRegisterOptions(rawConfig)
+	if err != nil {
+		return err
+	}
+	metrics.RegisterWithOptions(registerOpts, r.customCollectors...)
 	metrics.RecordInferenceExtensionInfo(version.CommitSHA, version.BuildRef)
 
 	setupLog.Info("EPP starting (file discovery mode)",
