@@ -19,13 +19,11 @@ package steps
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
-	"math/big"
 	"mime"
 	"net"
 	"net/http"
@@ -51,6 +49,7 @@ func init() { pipeline.Register(SGLangPDStepName, NewSGLangPDStep) }
 // The prefill EPP must run sglang-bootstrap-handler.
 type SGLangPDStep struct {
 	gwClient     *gateway.Client
+	kv           kv.Connector
 	prefillGrace time.Duration
 }
 
@@ -73,7 +72,11 @@ func NewSGLangPDStep(client *gateway.Client, params map[string]any) (pipeline.St
 	if grace <= 0 {
 		return nil, errors.New("sglang-pd: prefill_grace must be positive")
 	}
-	return &SGLangPDStep{gwClient: client, prefillGrace: grace}, nil
+	kvConn, err := kv.Build(kv.SGLang)
+	if err != nil {
+		return nil, fmt.Errorf("sglang-pd: %w", err)
+	}
+	return &SGLangPDStep{gwClient: client, kv: kvConn, prefillGrace: grace}, nil
 }
 
 func (s *SGLangPDStep) Name() string { return SGLangPDStepName }
@@ -92,15 +95,9 @@ func (s *SGLangPDStep) Execute(ctx context.Context, rc *pipeline.RequestContext)
 			return fmt.Errorf("sglang-pd requires sampling_params.n=1: %w", pipeline.ErrBadRequest)
 		}
 	}
-	// Keep the room exact through gateways that decode JSON numbers as float64.
-	room, err := rand.Int(rand.Reader, big.NewInt(1<<53))
-	if err != nil {
-		return fmt.Errorf("sglang-pd: create bootstrap room: %w", err)
-	}
 	body := maps.Clone(rc.Body)
 	delete(body, reqcommon.FieldBootstrapHost)
-	body[reqcommon.FieldBootstrapRoom] = room.Int64()
-	body[reqcommon.FieldBootstrapPort] = kv.ResolveSGLangBootstrapPort(ctx)
+	maps.Copy(body, s.kv.PreparePrefillKVParams(ctx, rc))
 	body[reqcommon.FieldStream] = true
 	prefillBody, err := json.Marshal(body)
 	if err != nil {

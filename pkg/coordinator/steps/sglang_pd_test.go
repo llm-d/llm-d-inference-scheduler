@@ -31,7 +31,6 @@ import (
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
-	"github.com/llm-d/llm-d-router/pkg/coordinator/connectors/kv"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/common/request"
@@ -43,7 +42,6 @@ func TestSGLangPDStartsDecodeBeforePrefillBody(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	ctx = log.IntoContext(ctx, funcr.New(func(_, _ string) {}, funcr.Options{Verbosity: logutil.TRACE}))
-	wantPort := kv.ResolveSGLangBootstrapPort(ctx)
 	releasePrefill := make(chan struct{})
 	prefillClosed := make(chan struct{})
 	var prefill map[string]any
@@ -53,8 +51,13 @@ func TestSGLangPDStartsDecodeBeforePrefillBody(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		if body[reqcommon.FieldBootstrapPort] != float64(wantPort) {
-			t.Errorf("bootstrap port = %v, want shared SGLang port %d", body[reqcommon.FieldBootstrapPort], wantPort)
+		if body[reqcommon.FieldBootstrapRoom] == nil || body[reqcommon.FieldBootstrapPort] == nil {
+			t.Errorf("missing top-level bootstrap fields: %v", body)
+		}
+		for _, key := range []string{reqcommon.FieldKVTransferParams, reqcommon.FieldDoRemoteDecode, reqcommon.FieldDoRemotePrefill} {
+			if _, present := body[key]; present {
+				t.Errorf("unexpected transfer field %s", key)
+			}
 		}
 		if r.Header.Get(reqcommon.EPPProfileHeaderKey) == gateway.PhasePrefill {
 			prefill = body
@@ -72,6 +75,9 @@ func TestSGLangPDStartsDecodeBeforePrefillBody(t *testing.T) {
 		}
 		if body[reqcommon.FieldBootstrapRoom] != prefill[reqcommon.FieldBootstrapRoom] {
 			t.Error("bootstrap rooms differ")
+		}
+		if body[reqcommon.FieldBootstrapPort] != prefill[reqcommon.FieldBootstrapPort] {
+			t.Error("bootstrap ports differ")
 		}
 		if body[reqcommon.FieldBootstrapHost] != "10.0.0.7" {
 			t.Errorf("wrong bootstrap host: %v", body)

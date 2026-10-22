@@ -356,7 +356,8 @@ reachable from both worker roles. The Rust frontend serves bootstrap on its HTTP
 port (for example, 8000). See [KV and EC transfer protocols](#kv-and-ec-transfer-protocols)
 for the shared setting. `prefill_grace` is the step's only parameter.
 
-The coordinator creates a numeric `bootstrap_room` shared by both requests.
+The step uses `kv-sglang` to create a numeric `bootstrap_room` and select the
+`bootstrap_port` shared by both requests.
 The prefill EPP sets `bootstrap_host` in the request body and returns the selected
 worker's HTTP address in `x-llm-d-prefiller-host-port`. On receiving those response
 headers, the coordinator sends decode with the same endpoint header and bootstrap
@@ -515,10 +516,9 @@ KV connector protocols ([pkg/coordinator/connectors/kv/](../pkg/coordinator/conn
 | `kv-sglang` | `sglang` | SGLang bootstrap: `bootstrap_host`, `bootstrap_port`, `bootstrap_room`. |
 | `kv-shared-storage` | `shared-storage` | Shared filesystem / object store: prefill writes KV, decode reads it; no transfer descriptor on the wire. |
 
-The `kv-sglang` connector and `sglang-pd` step share the `SGLANG_BOOTSTRAP_PORT`
-environment variable, which defaults to 8998. The value is read once on the first
-prefill request using either path. Invalid values select the default and are logged
-at error level.
+The `kv-sglang` connector reads `SGLANG_BOOTSTRAP_PORT` once on the first prefill
+request, defaulting to 8998. Invalid values select the default and are logged at
+error level.
 
 EC connector protocols ([pkg/coordinator/connectors/ec/](../pkg/coordinator/connectors/ec/)) ship encoder
 embeddings from encode pods to the prefill pod:

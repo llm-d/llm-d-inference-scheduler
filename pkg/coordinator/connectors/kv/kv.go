@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 // Package kv contains KV transfer connector implementations selected at
-// config time. Each connector defines the kv_transfer_params shape sent to
+// config time. Each connector defines the transfer parameters sent to
 // prefill and decode pods. Orchestration variants (shared-storage
 // try-decode-first) are not implemented in this package, they require
 // pipeline changes outside the per-step wire format.
@@ -36,17 +36,16 @@ const DefaultKVConnectorName = SharedStorage
 // log lines.
 const loggerName = "kv"
 
-// Connector controls the kv_transfer_params wire shape on the prefill and
-// decode requests. Implementations are stateless and safe to share across
-// requests.
+// Connector prepares transfer parameters for prefill and decode requests.
+// Steps place them in kv_transfer_params or at the top level for native SGLang.
+// Implementations are stateless and safe to share across requests.
 type Connector interface {
 	Name() string
-	// PreparePrefillKVParams returns the kv_transfer_params map written into
+	// PreparePrefillKVParams returns the transfer parameters written into
 	// the prefill request body.
 	PreparePrefillKVParams(ctx context.Context, reqCtx *pipeline.RequestContext) map[string]any
-	// PrepareDecodeKVParams returns the kv_transfer_params map written into
-	// the decode request body. The prefill response's kv_transfer_params is
-	// already populated into reqCtx.KVTransferParams by PrefillStep.
+	// PrepareDecodeKVParams returns the transfer parameters written into
+	// the decode request body using reqCtx.KVTransferParams.
 	PrepareDecodeKVParams(ctx context.Context, reqCtx *pipeline.RequestContext) map[string]any
 }
 
