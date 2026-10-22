@@ -47,7 +47,7 @@ All topologies are driven by the unified `disagg-profile-handler` plugin, which 
 
 ### Routing headers
 
-EPP passes its stage decisions to the sidecar in four headers:
+EPP passes its stage decisions to the sidecar in request headers:
 `x-llm-d-prefiller-host-port` and `x-llm-d-encoder-hosts-ports` carry the serving
 addresses the sidecar connects to; `x-llm-d-kv-cache-prefill-p2p-host-port` and
 `x-llm-d-kv-cache-source-p2p-host-port` carry the `OffloadingConnector` P2P tier
@@ -644,7 +644,8 @@ When the request carries the `x-llm-d-kv-cache-source-p2p-host-port` header and 
 in one step, naming a peer holding more cached prefix than the pod computing the
 prefix, with its P2P tier port), the sidecar reads the body, validates the block and
 carries it into the request it builds so vLLM pulls the cached prefix over the P2P
-tier instead of recomputing it. Without the header the body is forwarded unread. Under disaggregation the prefill request carries
+tier instead of recomputing it. Without the header the sidecar does not look for a
+source in the body. Under disaggregation the prefill request carries
 `{"remote_decoder": {...}, "remote_kv_source": {"kv_request_id": <own id>,
 "remote_host": <source host>, "remote_port": <source P2P port>}}` (the only
 supported multi-key combination); without a prefiller the decoder-only request
@@ -771,9 +772,11 @@ ingress. A client-supplied `remote_kv_source` is not: `p2p-source-producer` over
 it when it writes a source, and otherwise it reaches vLLM on the decode-only path.
 
 Set `--enable-ssrf-protection=true` in deployments reachable by untrusted
-clients. The sidecar then accepts a target only when its host is the IP or name
-of a pod selected by the InferencePool. The port is not checked. A request with
-a disallowed prefill target or prefill P2P address is rejected with `403`,
+clients. The sidecar then accepts a prefill or encoder target only when it is the
+IP or name of a pod selected by the InferencePool on one of the pool's target
+ports. The prefill P2P address and the KV cache source are checked by host alone,
+since the `OffloadingConnector` P2P tier port is not a pool target port. A request
+with a disallowed prefill target or prefill P2P address is rejected with `403`,
 disallowed encoder targets are dropped from the request, and a disallowed KV
 cache source is dropped and the request proceeds without a pull.
 

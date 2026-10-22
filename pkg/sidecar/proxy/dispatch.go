@@ -121,8 +121,8 @@ func (s *Server) disaggregatedPrefillHandler(apiType reqcommon.APIType) http.Han
 
 		p2p := p2pRouting{prefill: parsePrefillP2P(logger, strings.TrimSpace(routing.TakeRoutingHeaderValue(r.Header, routing.KVCachePrefillHeader)))}
 		// The decode pod dials this address. EPP sets it from the prefill
-		// endpoint it chose, so the host is the prefill target's unless the
-		// header was forged, which gets the prefill target's answer.
+		// endpoint it chose. Checked only when the host differs from the
+		// prefill target, which IsAllowed already cleared.
 		if p2p.prefill != nil && p2p.prefill.host != extractHost(prefillHostPort) && !s.allowlistValidator.IsAllowedHost(p2p.prefill.host) {
 			denySSRF(w, r, logger, span, "prefill P2P address", p2p.prefill.String())
 			return

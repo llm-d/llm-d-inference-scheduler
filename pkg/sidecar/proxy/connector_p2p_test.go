@@ -133,37 +133,50 @@ var _ = Describe("P2P Connector", func() {
 		<-testInfo.stoppedCh
 	})
 
-	// Encoder disaggregation runs the P/D stage after the encoder stage; the
-	// offloading connector needs the prefill P2P port there too.
-	It("should carry the prefill P2P port through the encoder stage", func() {
-		encoderBackend := httptest.NewServer(statusHandler(http.StatusOK, `{"choices":[{"message":{"content":""}}],"ec_transfer_params":{"hash-1":{"peer_host":"10.0.0.1","peer_port":5500}}}`))
-		DeferCleanup(encoderBackend.Close)
-		testInfo.proxy = NewProxy(Config{Port: "0", DecoderURL: testInfo.decodeURL, KVConnector: constants.KVConnectorOffloading, ECConnector: constants.ECConnectorNIXL})
-		proxyBaseAddr := testInfo.startProxy()
+	// Encoder disaggregation runs the P/D stage after the encoder stage; each
+	// EC connector must hand the prefill P2P port on to it. Only the NIXL
+	// connector writes ec_transfer_params into the prefill request.
+	DescribeTable("should carry the prefill P2P port through the encoder stage",
+		func(ecConnector string, prefillCarriesECParams bool) {
+			var encoderRequests atomic.Int32
+			encoderResponse := statusHandler(http.StatusOK, `{"choices":[{"message":{"content":""}}],"ec_transfer_params":{"hash-1":{"peer_host":"10.0.0.1","peer_port":5500}}}`)
+			encoderBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				encoderRequests.Add(1)
+				encoderResponse.ServeHTTP(w, r)
+			}))
+			DeferCleanup(encoderBackend.Close)
+			testInfo.proxy = NewProxy(Config{Port: "0", DecoderURL: testInfo.decodeURL, KVConnector: constants.KVConnectorOffloading, ECConnector: ecConnector})
+			proxyBaseAddr := testInfo.startProxy()
 
-		// One image, so the encoder stage runs.
-		body, err := json.Marshal(userMessageRequest(imageURLItem("https://example.com/img.jpg")))
-		Expect(err).ToNot(HaveOccurred())
-		prefillHostPort := testInfo.prefillBackend.URL[len("http://"):]
-		postChatCompletions(proxyBaseAddr, string(body), map[string]string{
-			routing.PrefillEndpointHeader:  prefillHostPort,
-			routing.KVCachePrefillHeader:   prefillP2PHostPort(prefillHostPort),
-			routing.EncoderEndpointsHeader: encoderBackend.URL[len("http://"):],
-		})
+			// One image, so the encoder stage runs.
+			body, err := json.Marshal(userMessageRequest(imageURLItem("https://example.com/img.jpg")))
+			Expect(err).ToNot(HaveOccurred())
+			prefillHostPort := testInfo.prefillBackend.URL[len("http://"):]
+			postChatCompletions(proxyBaseAddr, string(body), map[string]string{
+				routing.PrefillEndpointHeader:  prefillHostPort,
+				routing.KVCachePrefillHeader:   prefillP2PHostPort(prefillHostPort),
+				routing.EncoderEndpointsHeader: encoderBackend.URL[len("http://"):],
+			})
 
-		Eventually(func() int {
-			return len(testInfo.prefillHandler.GetCompletionRequests())
-		}).Should(Equal(1))
-		preq := testInfo.prefillHandler.GetCompletionRequests()[0]
-		Expect(preq).To(HaveKey(reqcommon.FieldECTransferParams))
+			Eventually(func() int {
+				return len(testInfo.prefillHandler.GetCompletionRequests())
+			}).Should(Equal(1))
+			Expect(encoderRequests.Load()).To(BeNumerically("==", 1))
+			preq := testInfo.prefillHandler.GetCompletionRequests()[0]
+			if prefillCarriesECParams {
+				Expect(preq).To(HaveKey(reqcommon.FieldECTransferParams))
+			}
 
-		decodePrefill := decodeRemotePrefiller(testInfo)
-		Expect(decodePrefill[reqcommon.FieldRemoteHost]).To(Equal(extractHost(prefillHostPort)))
-		Expect(decodePrefill[reqcommon.FieldRemotePort]).To(BeNumerically("==", p2pConnectorPort))
+			decodePrefill := decodeRemotePrefiller(testInfo)
+			Expect(decodePrefill[reqcommon.FieldRemoteHost]).To(Equal(extractHost(prefillHostPort)))
+			Expect(decodePrefill[reqcommon.FieldRemotePort]).To(BeNumerically("==", p2pConnectorPort))
 
-		testInfo.cancelFn()
-		<-testInfo.stoppedCh
-	})
+			testInfo.cancelFn()
+			<-testInfo.stoppedCh
+		},
+		Entry("ec-nixl", constants.ECConnectorNIXL, true),
+		Entry("ec-example", constants.ECExampleConnector, false),
+	)
 
 	It("should strip min_tokens from the prefill request and restore it in decode", func() {
 		proxyBaseAddr := testInfo.startProxy()

@@ -478,10 +478,10 @@ func requestSpreadFraction(requestID string) float64 {
 // pulls the prompt from a prefill pod, so a source next to it would be
 // pointless. The same peer goes on routing.KVCacheSourceHeader.
 func (p *Producer) PreRequest(ctx context.Context, request *scheduling.InferenceRequest, schedulingResult *scheduling.SchedulingResult) error {
-	// The server allocates Headers before any plugin runs and
-	// WithAttributeScope keeps that map on the copy a plugin sees, so this
-	// serves requests built without headers in tests. A map allocated here on
-	// a scoped copy would not reach the director.
+	// WithAttributeScope allocates Headers on the original request before
+	// taking the copy a plugin sees, so this guard never fires in the
+	// director. It serves tests that build a request without headers and
+	// call PreRequest directly.
 	if request.Headers == nil {
 		request.Headers = map[string]string{}
 	}
@@ -499,7 +499,15 @@ func (p *Producer) PreRequest(ctx context.Context, request *scheduling.Inference
 	}
 
 	computing := schedulingResult.ProfileResults[schedulingResult.PrimaryProfileName]
-	if pr, exists := schedulingResult.ProfileResults[p.prefillProfile]; exists && pr != nil && len(pr.TargetEndpoints) > 0 {
+	pr, exists := schedulingResult.ProfileResults[p.prefillProfile]
+	prefillPicked := exists && pr != nil && len(pr.TargetEndpoints) > 0
+	if logDecision {
+		// On a disaggregated request, false means prefillProfileName does not
+		// match the profile handler's prefill profile, and the sidecar
+		// offloading connector fails the request for the missing header.
+		kv = append(kv, "prefillProfile", p.prefillProfile, "prefillEndpoint", prefillPicked)
+	}
+	if prefillPicked {
 		computing = pr
 		if md := pr.TargetEndpoints[0].GetMetadata(); md != nil {
 			p2pPort, ok := p.p2pPort(md)

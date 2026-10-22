@@ -334,9 +334,10 @@ func (s *Server) fanoutEncoder(
 // runPDPipeline finalizes the post-encoder request and dispatches it to the
 // configured P/D connector or directly to the decoder. The caller has already
 // generated requestID and merged any encoder-side metadata into
-// body. p2p is the dispatcher's routing; only its prefill P2P port reaches the
-// P/D connector. On JSON-marshal failure, runPDPipeline writes the error
-// response itself (matching the existing handler pattern) and returns.
+// body. prefill is the prefill pod's P2P address, the only part of the
+// dispatcher's routing that reaches the P/D connector. On JSON-marshal
+// failure, runPDPipeline writes the error response itself (matching the
+// existing handler pattern) and returns.
 func (s *Server) runPDPipeline(
 	w http.ResponseWriter,
 	r *http.Request,

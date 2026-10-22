@@ -454,24 +454,30 @@ func TestServer_P2PSourceBodyReadRejectsUnreadableBody(t *testing.T) {
 	}
 }
 
-// The decoder-only branch does not read the body when the connector cannot
-// pull over the P2P tier, or when no source header announces a source, so the
-// body passes through untouched.
+// The decoder-only branch forwards the body byte for byte: it does not read
+// the body when the connector cannot pull over the P2P tier or when no source
+// header announces a source, and a body it reads is re-marshaled only when a
+// source block was removed from it.
 func TestServer_DecoderOnlyPassthroughLeavesBodyUnread(t *testing.T) {
 	const body = `{"model":"m","messages":[],"kv_transfer_params":{"remote_kv_source":{"remote_host":"10.0.0.5"}}}`
+	// Keys out of sorted order at the top level and inside an inspected field,
+	// which json.Marshal would reorder.
+	const noSourceBody = `{"model":"m","messages":[],"sampling_params":{"top_p":0.9,"temperature":0.5}}`
 	tests := []struct {
 		name        string
 		connector   string
 		headerName  string
+		body        string
 		wantWarning bool
 	}{
 		// A source on a connector that cannot pull means the plugin is enabled
 		// on a pool whose sidecar cannot use it, which is worth a line.
-		{"connector cannot pull", constants.KVConnectorSharedStorage, routing.KVCacheSourceHeader, true},
-		{"no source header", constants.KVConnectorOffloading, "", false},
+		{"connector cannot pull", constants.KVConnectorSharedStorage, routing.KVCacheSourceHeader, body, true},
+		{"no source header", constants.KVConnectorOffloading, "", body, false},
 		// The retired name carries a serving address an older EPP set; it is
 		// neither read nor forwarded.
-		{"retired source header name", constants.KVConnectorOffloading, routing.LegacyKVCacheSourceHeaders[0], false},
+		{"retired source header name", constants.KVConnectorOffloading, routing.LegacyKVCacheSourceHeaders[0], body, false},
+		{"source header without a source block", constants.KVConnectorOffloading, routing.KVCacheSourceHeader, noSourceBody, false},
 	}
 	stripped := routing.AllHeaderNames(routing.KVCacheSourceHeader)
 	for _, tt := range tests {
@@ -489,7 +495,7 @@ func TestServer_DecoderOnlyPassthroughLeavesBodyUnread(t *testing.T) {
 				forwardedHeaders = r.Header.Clone()
 			})
 
-			req := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(body))
+			req := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(tt.body))
 			if tt.headerName != "" {
 				req.Header.Set(tt.headerName, "10.0.0.5:7777")
 			}
@@ -497,8 +503,8 @@ func TestServer_DecoderOnlyPassthroughLeavesBodyUnread(t *testing.T) {
 
 			s.disaggregatedPrefillHandler(reqcommon.APITypeChatCompletions)(recorder, req)
 
-			if forwarded != body {
-				t.Errorf("forwarded body = %s, want %s", forwarded, body)
+			if forwarded != tt.body {
+				t.Errorf("forwarded body = %s, want %s", forwarded, tt.body)
 			}
 			for _, name := range stripped {
 				if v := forwardedHeaders.Get(name); v != "" {
@@ -513,17 +519,23 @@ func TestServer_DecoderOnlyPassthroughLeavesBodyUnread(t *testing.T) {
 	}
 }
 
-// The decode pod dials the prefill P2P address, so a forged header naming a
-// host outside the pool gets the prefill target's answer: 403, no pod request.
+// The decode pod dials the prefill P2P address. A host equal to the prefill
+// target's passes on the IsAllowed check of that target alone; any other host
+// must be on the allowlist, so a forged header naming a host outside the pool
+// gets 403 and no pod request.
 func TestServer_PrefillP2PAddressOutsideAllowlistIsForbidden(t *testing.T) {
+	poolHosts := set.New("prefill1", "prefill2")
 	tests := []struct {
-		name     string
-		p2pHost  string
-		wantCode int
+		name         string
+		p2pHost      string
+		allowedHosts set.Set[string]
+		wantCode     int
 	}{
-		{"prefill target's own host", "prefill1", http.StatusOK},
-		{"another pool host", "prefill2", http.StatusOK},
-		{"host outside the pool", "169.254.169.254", http.StatusForbidden},
+		{"prefill target's own host", "prefill1", poolHosts, http.StatusOK},
+		{"prefill target's own host without a host allowlist", "prefill1", set.New[string](), http.StatusOK},
+		{"another pool host", "prefill2", poolHosts, http.StatusOK},
+		{"another pool host without a host allowlist", "prefill2", set.New[string](), http.StatusForbidden},
+		{"host outside the pool", "169.254.169.254", poolHosts, http.StatusForbidden},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -531,13 +543,13 @@ func TestServer_PrefillP2PAddressOutsideAllowlistIsForbidden(t *testing.T) {
 			s.allowlistValidator = &AllowlistValidator{
 				enabled:        true,
 				allowedTargets: set.New("prefill1:8000", "prefill2:8000"),
-				allowedHosts:   set.New("prefill1", "prefill2"),
+				allowedHosts:   tt.allowedHosts,
 			}
 			s.dataParallelProxies = make(map[string]http.Handler)
 
-			var dispatched bool
-			s.handlePDConnector = func(w http.ResponseWriter, _ *http.Request, _ string, _ p2pRouting, _ reqcommon.APIType) {
-				dispatched = true
+			var dispatched *p2pPeer
+			s.handlePDConnector = func(w http.ResponseWriter, _ *http.Request, _ string, p2p p2pRouting, _ reqcommon.APIType) {
+				dispatched = p2p.prefill
 				w.WriteHeader(http.StatusOK)
 			}
 
@@ -551,8 +563,14 @@ func TestServer_PrefillP2PAddressOutsideAllowlistIsForbidden(t *testing.T) {
 			if recorder.Code != tt.wantCode {
 				t.Fatalf("status = %d, want %d: %s", recorder.Code, tt.wantCode, recorder.Body.String())
 			}
-			if dispatched != (tt.wantCode == http.StatusOK) {
-				t.Errorf("P/D connector called = %v", dispatched)
+			if tt.wantCode != http.StatusOK {
+				if dispatched != nil {
+					t.Errorf("P/D connector called with prefill peer %s", dispatched)
+				}
+				return
+			}
+			if want := (p2pPeer{host: tt.p2pHost, port: 7777}); dispatched == nil || *dispatched != want {
+				t.Errorf("P/D connector prefill peer = %s, want %s", dispatched, &want)
 			}
 		})
 	}

@@ -25,10 +25,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-logr/logr/funcr"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
@@ -798,6 +803,31 @@ func TestPreRequest_ConfiguredPrefillProfileName(t *testing.T) {
 	require.NoError(t, p.PreRequest(ctx, req, result))
 	assertNoSource(t, req)
 	assertPrefillHeader(t, req, "10.0.0.2", defaultP2PConnectorPort)
+}
+
+// A prefillProfileName that matches no profile result sets no prefill header,
+// and the decision log names the configured profile so the mismatch is
+// visible from the EPP side.
+func TestPreRequest_DecisionLogNamesUnmatchedPrefillProfile(t *testing.T) {
+	var lines []string
+	capture := funcr.New(func(_, args string) { lines = append(lines, args) }, funcr.Options{Verbosity: int(logging.DEFAULT)})
+	ctx := log.IntoContext(utils.NewTestContext(t), capture)
+	p := New("test", Config{MinCachedTokenDelta: 1, PrefillProfileName: "P"})
+
+	req := preRequest(p, "req-unmatched-profile", peer("10.0.0.2", 48))
+	result := &scheduling.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*scheduling.ProfileRunResult{
+			"decode":  {TargetEndpoints: []scheduling.Endpoint{endpoint(p, "pod-a", "10.0.0.1", 0)}},
+			"prefill": {TargetEndpoints: []scheduling.Endpoint{endpoint(p, "pod-b", "10.0.0.2", 3)}},
+		},
+	}
+	require.NoError(t, p.PreRequest(ctx, req, result))
+	assert.Empty(t, req.Headers[routing.KVCachePrefillHeader])
+
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], `"prefillProfile"="P"`)
+	assert.Contains(t, lines[0], `"prefillEndpoint"=false`)
 }
 
 // Factory wires a custom prefillProfileName; default is "prefill".

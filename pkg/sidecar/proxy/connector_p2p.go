@@ -95,7 +95,7 @@ func (s *Server) requestBody(r *http.Request, w http.ResponseWriter, p2p p2pRout
 // fetch finds the blocks already stored, matching the NIXL path.
 func (s *Server) handleP2P(w http.ResponseWriter, r *http.Request, prefillPodHostPort string, p2p p2pRouting, apiType reqcommon.APIType) {
 	if p2p.prefill == nil {
-		err := fmt.Errorf("request header %s is absent or not a host:port with a TCP port; the EPP must run p2p-source-producer", routing.KVCachePrefillHeader)
+		err := fmt.Errorf("request header %s is absent or not a host:port with a TCP port; the EPP must run p2p-source-producer with prefillProfileName matching the disaggregation prefill profile", routing.KVCachePrefillHeader)
 		s.logger.Error(err, "cannot build the decode request", "prefill_host", extractHost(prefillPodHostPort))
 		if err := errorInternalServerError(err, w); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
@@ -303,11 +303,11 @@ func addP2PPullToPrefill(prefillKVParams map[string]any, source *kvSource) {
 
 // kvSourceFromBody removes kv_transfer_params.remote_kv_source from the parsed
 // body, and kv_transfer_params itself when that was its only key, and reports
-// whether the source was present. It returns the block when it is
+// whether the source was present. It returns the source when the block is
 // well formed and names an allowed peer: a string kv_request_id, a string
 // remote_host and an integer remote_port in the TCP range, with the host on
-// the SSRF allowlist. EPP writes the block, so the sidecar copies it and
-// derives nothing. A rejected block is logged and dropped, so the request
+// the SSRF allowlist. Only those three fields are kept; any other key in the
+// block is dropped. A rejected block is logged and dropped, so the request
 // proceeds without a pull.
 func (s *Server) kvSourceFromBody(logger logr.Logger, clientIP string, requestData map[string]any) (source *kvSource, present bool) {
 	kvParams, _ := requestData[reqcommon.FieldKVTransferParams].(map[string]any)

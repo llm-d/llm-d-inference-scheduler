@@ -298,7 +298,7 @@ func compileEndpointPortRules(config *endpointDiscoveryConfig) ([]compiledEndpoi
 func (p *discoveredEndpointPicker) resolveRenderPort(meta *fwkdl.EndpointMetadata) (string, error) {
 	if len(p.portRules) == 0 {
 		port, err := strconv.Atoi(meta.Port)
-		if err != nil || port < 1 || port > 65535 {
+		if err != nil || !routing.IsTCPPort(port) {
 			return "", fmt.Errorf("discovered endpoint %s has invalid port %q", meta.ID, meta.Port)
 		}
 		return meta.Port, nil
@@ -308,9 +308,12 @@ func (p *discoveredEndpointPicker) resolveRenderPort(meta *fwkdl.EndpointMetadat
 		if !rule.selector.Matches(labels.Set(meta.Labels)) {
 			continue
 		}
+		if meta.RankIndex < 0 {
+			return "", fmt.Errorf("discovered endpoint %s has invalid rank index %d", meta.ID, meta.RankIndex)
+		}
 		port, ok := routing.RankPort(rule.basePort, meta.RankIndex)
 		if !ok {
-			return "", fmt.Errorf("discovered endpoint %s has invalid rank index %d: resolved render port from base %d outside 1-65535", meta.ID, meta.RankIndex, rule.basePort)
+			return "", fmt.Errorf("discovered endpoint %s resolved render port outside 1-65535", meta.ID)
 		}
 		return strconv.Itoa(port), nil
 	}
