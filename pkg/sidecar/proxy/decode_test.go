@@ -191,7 +191,7 @@ var _ = Describe("Chunked Decode", func() {
 				}
 				var last map[string]any
 				Expect(json.Unmarshal(gotMessages[len(gotMessages)-1], &last)).To(Succeed())
-				Expect(last).To(HaveKeyWithValue(reqcommon.FieldRole, roleAssistant))
+				Expect(last).To(HaveKeyWithValue(reqcommon.FieldRole, reqcommon.RoleAssistant))
 				Expect(last).To(HaveKeyWithValue(reqcommon.FieldContent, wantText))
 				if continueFinal {
 					Expect(last).To(HaveKeyWithValue("name", "writer"))
