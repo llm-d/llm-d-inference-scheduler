@@ -216,12 +216,11 @@ type RequestContext struct {
 	ResponseWriter http.ResponseWriter
 }
 
-// PendingPrefill carries the selected endpoint and completion of a prefill stream.
+// PendingPrefill tracks completion and cleanup of a prefill stream.
 // Decode calls Finish(true) on success; pipeline exit calls Finish(false) otherwise.
 type PendingPrefill struct {
-	Endpoint string
-	Done     <-chan error
-	Finish   func(success bool)
+	Done   <-chan error
+	Finish func(success bool)
 }
 
 // MultimodalEntry describes one multimodal item in the request and where it

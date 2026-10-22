@@ -26,7 +26,6 @@ import (
 	"maps"
 	"mime"
 	"net"
-	"strconv"
 	"strings"
 	"time"
 
@@ -171,13 +170,10 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 	reqCtx.CaptureResponseHeaders(resp.Header)
 	if done != nil {
 		mediaType, _, mediaErr := mime.ParseMediaType(resp.Header.Get(reqcommon.HeaderContentType))
-		endpoint := resp.Header.Get(routing.PrefillEndpointHeader)
-		host, port, endpointErr := net.SplitHostPort(endpoint)
-		portNumber, portErr := strconv.Atoi(port)
-		if mediaErr != nil || mediaType != request.MediaTypeEventStream || endpointErr != nil || host == "" || portErr != nil || portNumber < 1 || portNumber > 65535 {
+		host, _, endpointErr := net.SplitHostPort(resp.Header.Get(routing.PrefillEndpointHeader))
+		if mediaErr != nil || mediaType != request.MediaTypeEventStream || endpointErr != nil || host == "" {
 			return errors.New("prefill: streaming SGLang requires an event stream and a valid selected endpoint response header")
 		}
-		reqCtx.Prefill.Endpoint = endpoint
 		reqCtx.KVTransferParams[reqcommon.FieldBootstrapHost] = host
 		go func() {
 			defer resp.Body.Close()
@@ -239,7 +235,6 @@ func (s *PrefillStep) buildPrefillBody(ctx context.Context, reqCtx *pipeline.Req
 		delete(body, reqcommon.FieldBootstrapHost)
 		reqCtx.KVTransferParams = s.kv.PreparePrefillKVParams(ctx, reqCtx)
 		maps.Copy(body, reqCtx.KVTransferParams)
-		body[reqcommon.FieldStream] = true
 		return body, nil
 	}
 	ecParams, err := s.ec.PreparePrefillECParams(ctx, reqCtx)

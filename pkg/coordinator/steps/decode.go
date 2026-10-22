@@ -28,7 +28,6 @@ import (
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
-	"github.com/llm-d/llm-d-router/pkg/common/routing"
 	"github.com/llm-d/llm-d-router/pkg/common/usage"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/connectors/kv"
@@ -74,9 +73,7 @@ func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 	logger.V(logutil.DEFAULT).Info("sending request", "path", reqCtx.OriginalPath, "stream", reqCtx.Stream)
 
 	decodeCtx := ctx
-	var headers map[string]string
 	if reqCtx.Prefill != nil {
-		headers = map[string]string{routing.PrefillEndpointHeader: reqCtx.Prefill.Endpoint}
 		var cancel context.CancelCauseFunc
 		decodeCtx, cancel = context.WithCancelCause(ctx)
 		defer cancel(nil)
@@ -91,7 +88,7 @@ func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 			}
 		}()
 	}
-	proxyReq, err := newDecodeProxyRequest(decodeCtx, logger, DecodeStepName, reqCtx, s.gwClient, reqCtx.Body, headers)
+	proxyReq, err := newDecodeProxyRequest(decodeCtx, logger, DecodeStepName, reqCtx, s.gwClient, reqCtx.Body, nil)
 	if err != nil {
 		return err
 	}

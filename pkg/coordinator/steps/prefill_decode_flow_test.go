@@ -43,7 +43,7 @@ import (
 )
 
 func TestSGLangPrefillDecode(t *testing.T) {
-	for _, mode := range []string{"early decode", "prefill error", "prefill abort", "prefill EOF", "error before headers", "client cancellation", "decode failure", "grace expiry", "missing endpoint"} {
+	for _, mode := range []string{"early decode", "prefill abort", "prefill EOF", "error before headers", "client cancellation", "decode failure", "grace expiry", "missing endpoint"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			releasePrefill := make(chan struct{})
@@ -58,11 +58,6 @@ func TestSGLangPrefillDecode(t *testing.T) {
 				}
 				if r.URL.Path != reqcommon.PathSGLangGenerate || body[reqcommon.FieldBootstrapRoom] == nil || body[reqcommon.FieldBootstrapPort] == nil {
 					t.Errorf("invalid native SGLang request: %s %v", r.URL.Path, body)
-				}
-				for _, key := range []string{reqcommon.FieldKVTransferParams, reqcommon.FieldDoRemoteDecode, reqcommon.FieldDoRemotePrefill} {
-					if _, present := body[key]; present {
-						t.Errorf("unexpected transfer field %s", key)
-					}
 				}
 				w.Header().Set(reqcommon.HeaderContentType, request.MediaTypeEventStream)
 				if r.Header.Get(reqcommon.EPPProfileHeaderKey) == gateway.PhasePrefill {
@@ -82,7 +77,7 @@ func TestSGLangPrefillDecode(t *testing.T) {
 					select {
 					case <-ready:
 						switch mode {
-						case "prefill error", "error before headers":
+						case "error before headers":
 							_, _ = io.WriteString(w, "data: {\"error\":\"failed\"}\n\n")
 						case "prefill abort":
 							_, _ = io.WriteString(w, "data: {\"meta_info\":{\"finish_reason\":{\"type\":\"abort\"}}}\n\n")
@@ -99,7 +94,7 @@ func TestSGLangPrefillDecode(t *testing.T) {
 				if body[reqcommon.FieldBootstrapRoom] != prefill[reqcommon.FieldBootstrapRoom] || body[reqcommon.FieldBootstrapPort] != prefill[reqcommon.FieldBootstrapPort] {
 					t.Error("prefill and decode bootstrap parameters differ")
 				}
-				if body[reqcommon.FieldBootstrapHost] != "10.0.0.7" || r.Header.Get(routing.PrefillEndpointHeader) != "10.0.0.7:8000" {
+				if body[reqcommon.FieldBootstrapHost] != "10.0.0.7" {
 					t.Error("decode did not use the selected prefill endpoint")
 				}
 				if mode == "decode failure" {

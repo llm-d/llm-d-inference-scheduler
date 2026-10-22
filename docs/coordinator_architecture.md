@@ -378,7 +378,7 @@ The KV connector creates a numeric `bootstrap_room` and `bootstrap_port` shared
 by both requests. SGLang starts the streaming response before generated frames
 are available. On receiving the response headers, the coordinator derives
 `bootstrap_host` from the endpoint header and starts decode with the bootstrap
-fields and that header. EPP selects the decode worker independently.
+fields in the body. EPP selects the decode worker independently.
 
 Prefill drains concurrently with decode. Prefill errors or EOF without `[DONE]`
 cancel decode. Client cancellation and decode failure cancel prefill. Successful
