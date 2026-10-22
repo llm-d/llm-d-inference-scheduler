@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-router/pkg/kvcache/tokenization"
 	tokenizerTypes "github.com/llm-d/llm-d-router/pkg/kvcache/tokenization/types"
@@ -440,7 +441,7 @@ func renderOnlyBudget(path string, payload []byte) ([]byte, error) {
 		var thinking struct {
 			Type string `json:"type"`
 		}
-		if json.Unmarshal(envelope["thinking"], &thinking) == nil && thinking.Type == "enabled" {
+		if json.Unmarshal(envelope["thinking"], &thinking) == nil && thinking.Type == reqcommon.ThinkingTypeEnabled {
 			delete(envelope, "thinking")
 		}
 	}
