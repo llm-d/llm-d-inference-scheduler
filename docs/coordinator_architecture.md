@@ -373,6 +373,8 @@ include this header on the prefill route. Activate `sglanghttp-parser` in EPP.
 For a shared EPP, use `header-profile-handler` and the prefill/decode role filters.
 For Rust frontends without `/metrics`, use `endpoint-notification-source`,
 `inflight-load-producer`, and `concurrency-detector` instead of metric polling.
+Keep SGLang startup warmup enabled and use `/health` for readiness so the initial
+kernel compilation runs before the worker receives traffic.
 
 The KV connector creates a numeric `bootstrap_room` and `bootstrap_port` shared
 by both requests. SGLang starts the streaming response before generated frames
