@@ -82,7 +82,7 @@ func (s *Server) handleP2P(w http.ResponseWriter, r *http.Request, prefillPodHos
 
 	prefillBody, err := json.Marshal(prefillData)
 	if err != nil {
-		if err := errorJSONInvalid(err, w); err != nil {
+		if err := errorJSONInvalid(w, r, err); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
 		return
@@ -104,7 +104,7 @@ func (s *Server) handleP2P(w http.ResponseWriter, r *http.Request, prefillPodHos
 
 	decodeBody, err := json.Marshal(decodeData)
 	if err != nil {
-		if err := errorJSONInvalid(err, w); err != nil {
+		if err := errorJSONInvalid(w, r, err); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
 		return
@@ -132,7 +132,7 @@ func (s *Server) handleP2PSequentialRequests(w http.ResponseWriter, r *http.Requ
 
 	prefillHandler, err := s.prefillerProxyHandler(prefillHost)
 	if err != nil {
-		if err := errorBadGateway(err, w); err != nil {
+		if err := errorBadGateway(w, r, err); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
 		return
@@ -371,7 +371,7 @@ func (s *Server) decodeWithP2PSource(w http.ResponseWriter, r *http.Request, sou
 
 	newBody, err := json.Marshal(requestData)
 	if err != nil {
-		if err := errorJSONInvalid(err, w); err != nil {
+		if err := errorJSONInvalid(w, r, err); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
 		return

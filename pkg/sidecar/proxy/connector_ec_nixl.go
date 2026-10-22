@@ -114,7 +114,7 @@ func (s *Server) handleECNIXL(w http.ResponseWriter, r *http.Request, prefillEnd
 
 	reqUUID, err := uuid.NewUUID()
 	if err != nil {
-		if err := errorBadGateway(err, w); err != nil {
+		if err := errorBadGateway(w, r, err); err != nil {
 			s.logger.Error(err, "failed to send error response to client")
 		}
 		return
@@ -128,7 +128,7 @@ func (s *Server) handleECNIXL(w http.ResponseWriter, r *http.Request, prefillEnd
 		if err != nil {
 			metrics.RecordError(metrics.StageEncode)
 			s.logger.Error(err, "encoder processing failed", "requestID", requestID)
-			if err := errorBadGateway(err, w); err != nil {
+			if err := errorBadGateway(w, r, err); err != nil {
 				s.logger.Error(err, "failed to send error response to client")
 			}
 			return
