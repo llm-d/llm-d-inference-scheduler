@@ -970,20 +970,24 @@ func TestPluginFactory_RejectsTokenizersPoolConfig(t *testing.T) {
 	require.Contains(t, err.Error(), `unknown field "tokenizersPoolConfig"`)
 }
 
-// TestValidateTokenProducer is the regression test for #1471: the
+// TestTokenProducerDependencyValidation is the regression test for #1471: the
 // precise-prefix-cache producer hashes engine-aligned token IDs into KV-block
 // keys that must match the model server's prefix cache. The token-producer's
 // estimate backend emits non-engine pseudo-tokens, so a precise config that
 // resolves its TokenizedPrompt via the estimate backend would silently corrupt
-// lookups. ValidateTokenProducer runs at the runner level after auto-defaults,
-// so it is independent of factory instantiation order (which is DAG/map-driven).
-func TestValidateTokenProducer(t *testing.T) {
+// lookups. Level-2 attribute validation in datalayer.BuildRegistry and
+// Registry.ValidateConsumer rejects an estimate-backed or missing token-producer
+// at startup, independent of factory instantiation order.
+func TestTokenProducerDependencyValidation(t *testing.T) {
 	newHandle := func(t *testing.T) plugin.Handle {
 		return plugin.NewEppHandle(utils.NewTestContext(t), nil)
 	}
 	addPrecise := func(t *testing.T, handle plugin.Handle) {
 		p, err := PluginFactory("precise", nil, handle)
 		require.NoError(t, err)
+		t.Cleanup(func() {
+			p.(*Producer).subscribersManager.Shutdown(utils.NewTestContext(t))
+		})
 		handle.AddPlugin(p.TypedName().Name, p)
 	}
 	addTokenProducer := func(t *testing.T, handle plugin.Handle, raw string) {
@@ -991,17 +995,32 @@ func TestValidateTokenProducer(t *testing.T) {
 		require.NoError(t, err)
 		handle.AddPlugin("token-producer", tp)
 	}
+	validateHandle := func(handle plugin.Handle) error {
+		plugins := handle.GetAllPlugins()
+		reg, err := fwkdl.BuildRegistry(plugins)
+		if err != nil {
+			return err
+		}
+		for _, p := range plugins {
+			if c, ok := p.(plugin.ConsumerPlugin); ok {
+				if err := reg.ValidateConsumer(c); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
 
 	t.Run("no precise producer: nothing to validate", func(t *testing.T) {
 		handle := newHandle(t)
-		require.NoError(t, ValidateTokenProducer(handle))
+		require.NoError(t, validateHandle(handle))
 	})
 
 	t.Run("precise with render-backed token-producer: ok", func(t *testing.T) {
 		handle := newHandle(t)
 		addTokenProducer(t, handle, `{"modelName":"test-model"}`)
 		addPrecise(t, handle)
-		require.NoError(t, ValidateTokenProducer(handle))
+		require.NoError(t, validateHandle(handle))
 	})
 
 	t.Run("precise with estimate-backed token-producer: rejected", func(t *testing.T) {
@@ -1009,17 +1028,17 @@ func TestValidateTokenProducer(t *testing.T) {
 		// Empty config selects the zero-config estimate default.
 		addTokenProducer(t, handle, `{}`)
 		addPrecise(t, handle)
-		err := ValidateTokenProducer(handle)
+		err := validateHandle(handle)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "token-producer")
+		require.Contains(t, err.Error(), `producer attribute "backend"="estimate" does not match required "vllm"`)
 	})
 
 	t.Run("precise with no token-producer at all: rejected", func(t *testing.T) {
 		handle := newHandle(t)
 		addPrecise(t, handle)
-		err := ValidateTokenProducer(handle)
+		err := validateHandle(handle)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "token-producer")
+		require.Contains(t, err.Error(), "not produced by any registered plugin")
 	})
 
 	t.Run("precise with custom-named render producer and estimate default: rejected", func(t *testing.T) {
@@ -1029,9 +1048,9 @@ func TestValidateTokenProducer(t *testing.T) {
 		require.NoError(t, err)
 		handle.AddPlugin("render-tp", customTP)
 		addPrecise(t, handle)
-		err = ValidateTokenProducer(handle)
+		err = validateHandle(handle)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "token-producer")
+		require.Contains(t, err.Error(), `producer attribute "backend"="estimate" does not match required "vllm"`)
 	})
 }
 

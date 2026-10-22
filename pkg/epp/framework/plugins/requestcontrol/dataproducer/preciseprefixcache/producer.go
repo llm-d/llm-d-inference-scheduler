@@ -146,37 +146,6 @@ func PluginFactory(name string, rawParameters *json.Decoder, handle plugin.Handl
 	return p, nil
 }
 
-// ValidateTokenProducer verifies that when a precise-prefix-cache-producer is
-// configured, a token-producer with the vllm render backend is present in the
-// handle. The estimate backend emits byte-packed pseudo-tokens, which would
-// silently corrupt the KV-block hashes this producer feeds to the indexer.
-//
-// This runs at the runner level after CreateMissingDataProducers, not inside the
-// factory: factory instantiation order is decided by the plugin DAG's
-// topological sort (which seeds from a map and so varies per process start), not
-// by the plugins-list order, so a factory-time check cannot rely on the
-// token-producer being constructed first. By the time this runs, every plugin --
-// explicit and auto-defaulted (an absent token-producer is auto-created as the
-// estimate backend) -- is in the handle, so the check is order-independent. See #1471.
-func ValidateTokenProducer(handle plugin.Handle) error {
-	hasPrecise := false
-	for _, p := range handle.GetAllPlugins() {
-		if p.TypedName().Type == PluginType {
-			hasPrecise = true
-			break
-		}
-	}
-	if !hasPrecise {
-		return nil
-	}
-
-	tp, ok := handle.Plugin(tokenproducer.PluginType).(*tokenproducer.Plugin)
-	if !ok || tp.Backend() != tokenproducer.BackendVLLM {
-		return fmt.Errorf("%s requires a %s plugin with a vllm backend", PluginType, tokenproducer.PluginType)
-	}
-	return nil
-}
-
 // New constructs a precise-prefix-cache-producer. The instance name becomes
 // the producer name on PrefixCacheMatchInfoDataKey, which downstream
 // consumers must match (see prefix-cache-scorer's prefixMatchInfoProducerName).
@@ -328,10 +297,17 @@ func (p *Producer) Produces() map[plugin.DataKey]any {
 }
 
 // Consumes declares the TokenizedRequest dependency from token-producer so
-// the data-layer DAG orders tokenization before this producer runs.
+// the data-layer DAG orders tokenization before this producer runs, and uses
+// Level-2 attribute matching to require the engine-aligned vllm backend
+// (rejecting the estimate backend's byte-packed pseudo-tokens at startup).
 func (p *Producer) Consumes() plugin.DataDependencies {
 	return plugin.DataDependencies{
-		Required: map[plugin.DataKey]any{tokenproducer.TokenizedPromptDataKey: scheduling.TokenizedRequest{}},
+		Required: map[plugin.DataKey]any{
+			tokenproducer.TokenizedPromptDataKey: plugin.ConsumedData{
+				Type:    scheduling.TokenizedRequest{},
+				Matches: plugin.MatchKeyValues(map[string]string{"backend": tokenproducer.BackendVLLM}),
+			},
+		},
 	}
 }
 
