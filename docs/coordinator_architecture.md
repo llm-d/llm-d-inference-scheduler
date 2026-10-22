@@ -340,7 +340,7 @@ for the comparison.
 
 ### Streaming SGLang prefill and decode
 
-Native SGLang `/generate` supports DP1 with `stream: true` and
+Native SGLang `/generate` supports one attention DP rank per worker with `stream: true` and
 `sampling_params.n` absent or 1. Use the existing prefill and decode steps:
 
 ```yaml
@@ -380,10 +380,11 @@ are available. On receiving the response headers, the coordinator derives
 `bootstrap_host` from the endpoint header and starts decode with the bootstrap
 fields in the body. EPP selects the decode worker independently.
 
-Prefill drains concurrently with decode. Prefill transport errors cancel decode.
-Client cancellation and decode failure cancel prefill. Successful
+Prefill drains concurrently with decode. Prefill transport errors and SGLang
+error events cancel decode.
+Client cancellation and decode HTTP or transport errors cancel prefill. Successful
 decode allows prefill up to `prefill_grace` to finish without delaying the client;
-later prefill transport failures are logged.
+later prefill failures are logged.
 Response buffering filters and upstream retries that can change the worker are
 unsupported.
 

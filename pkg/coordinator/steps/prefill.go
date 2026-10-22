@@ -17,16 +17,18 @@ limitations under the License.
 package steps
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"mime"
 	"net"
+	"net/http"
 	"time"
 
+	"github.com/openai/openai-go/packages/ssestream"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
@@ -176,7 +178,7 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 		go func() {
 			defer resp.Body.Close()
 			defer close(done)
-			_, err := io.Copy(io.Discard, resp.Body)
+			err := drainSGLangPrefill(resp)
 			if err != nil && prefillCtx.Err() == nil {
 				logger.Error(err, "prefill stream failed")
 			}
@@ -215,10 +217,45 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 	return nil
 }
 
+func drainSGLangPrefill(resp *http.Response) error {
+	stream := ssestream.NewDecoder(resp)
+	for stream.Next() {
+		data := bytes.TrimSpace(stream.Event().Data)
+		if len(data) == 0 || bytes.Equal(data, []byte(reqcommon.SSEDoneMarker)) {
+			continue
+		}
+		var event struct {
+			Error    json.RawMessage `json:"error"`
+			MetaInfo struct {
+				FinishReason struct {
+					Type       string `json:"type"`
+					StatusCode *int   `json:"status_code"`
+					Message    string `json:"message"`
+				} `json:"finish_reason"`
+			} `json:"meta_info"`
+		}
+		if err := json.Unmarshal(data, &event); err != nil {
+			return fmt.Errorf("decode SGLang prefill event: %w", err)
+		}
+		if len(event.Error) > 0 && !bytes.Equal(event.Error, []byte("null")) {
+			return fmt.Errorf("SGLang prefill error: %s", event.Error)
+		}
+		finish := event.MetaInfo.FinishReason
+		// SGLang leaves status_code null for a user abort.
+		if finish.Type == "abort" && finish.StatusCode != nil {
+			return fmt.Errorf("SGLang prefill aborted (%d): %s", *finish.StatusCode, finish.Message)
+		}
+	}
+	return stream.Err()
+}
+
 func (s *PrefillStep) buildPrefillBody(ctx context.Context, reqCtx *pipeline.RequestContext, format reqcommon.APIType) (map[string]any, error) {
 	if format == reqcommon.APITypeSGLangGenerate {
 		if s.kv.Name() != kv.SGLang || !reqCtx.Stream {
 			return nil, fmt.Errorf("/generate prefill requires kv-sglang and stream=true: %w", pipeline.ErrBadRequest)
+		}
+		if reqCtx.Body["disagg_prefill_dp_rank"] != nil {
+			return nil, fmt.Errorf("client-supplied disagg_prefill_dp_rank is unsupported: %w", pipeline.ErrBadRequest)
 		}
 		if sampling, present := reqCtx.Body[reqcommon.FieldSamplingParams]; present {
 			params, ok := sampling.(map[string]any)

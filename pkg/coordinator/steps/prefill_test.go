@@ -1236,6 +1236,40 @@ func TestPrefillStep_SGLangMissingEndpoint(t *testing.T) {
 	require.Nil(t, reqCtx.Prefill)
 }
 
+func TestDrainSGLangPrefill(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		data string
+		err  string
+	}{
+		{
+			name: "error event",
+			data: `{"error":{"message":"bootstrap failed"}}`,
+			err:  "bootstrap failed",
+		},
+		{
+			name: "native abort",
+			data: `{"meta_info":{"finish_reason":{"type":"abort","status_code":500,"message":"bootstrap failed"}}}`,
+			err:  "bootstrap failed",
+		},
+		{
+			name: "user abort",
+			data: `{"meta_info":{"finish_reason":{"type":"abort","status_code":null}}}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := "data: " + test.data + "\n\n" + reqcommon.SSEDone + "\n\n"
+			resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
+			err := drainSGLangPrefill(resp)
+			if test.err != "" {
+				require.ErrorContains(t, err, test.err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestPrefillStep_SGLangCleanup(t *testing.T) {
 	grace := 50 * time.Millisecond
 	for _, name := range []string{"client cancellation", "explicit abort", "grace expiry"} {
