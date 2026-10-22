@@ -46,6 +46,11 @@ var (
 	}
 )
 
+// MaxHistogramBuckets caps how many boundaries a configured ladder may have.
+// Each boundary is another series per label combination, so an oversized list
+// multiplies cardinality. The limit is about 2.5 times the longer default ladder.
+const MaxHistogramBuckets = 64
+
 // ValidateHistogramBuckets reports whether edges can be used as Prometheus
 // histogram bucket boundaries. Callers pass only explicitly configured values;
 // an empty slice means the caller asked for a histogram with no buckets and is
@@ -53,6 +58,9 @@ var (
 func ValidateHistogramBuckets(edges []float64) error {
 	if len(edges) == 0 {
 		return errors.New("at least one bucket boundary is required")
+	}
+	if len(edges) > MaxHistogramBuckets {
+		return fmt.Errorf("%d bucket boundaries exceed the maximum of %d", len(edges), MaxHistogramBuckets)
 	}
 	var prev float64
 	for i, edge := range edges {

@@ -96,18 +96,20 @@ func TestValidateHistogramBuckets(t *testing.T) {
 		edges   []float64
 		wantErr bool
 	}{
-		"tpot defaults": {DefaultRequestTPOTBuckets, false},
-		"itl defaults":  {DefaultInterTokenLatencyBuckets, false},
-		"single edge":   {[]float64{0.01}, false},
-		"nil":           {nil, true},
-		"empty":         {[]float64{}, true},
-		"zero":          {[]float64{0, 0.01}, true},
-		"negative":      {[]float64{-0.01, 0.01}, true},
-		"nan":           {[]float64{0.01, math.NaN()}, true},
-		"positive inf":  {[]float64{0.01, math.Inf(1)}, true},
-		"negative inf":  {[]float64{math.Inf(-1), 0.01}, true},
-		"duplicate":     {[]float64{0.01, 0.01}, true},
-		"descending":    {[]float64{0.02, 0.01}, true},
+		"tpot defaults":               {DefaultRequestTPOTBuckets, false},
+		"itl defaults":                {DefaultInterTokenLatencyBuckets, false},
+		"single edge":                 {[]float64{0.01}, false},
+		"nil":                         {nil, true},
+		"empty":                       {[]float64{}, true},
+		"zero":                        {[]float64{0, 0.01}, true},
+		"negative":                    {[]float64{-0.01, 0.01}, true},
+		"nan":                         {[]float64{0.01, math.NaN()}, true},
+		"positive inf":                {[]float64{0.01, math.Inf(1)}, true},
+		"negative inf":                {[]float64{math.Inf(-1), 0.01}, true},
+		"duplicate":                   {[]float64{0.01, 0.01}, true},
+		"descending":                  {[]float64{0.02, 0.01}, true},
+		"at the maximum bucket count": {ascendingEdges(MaxHistogramBuckets), false},
+		"one over the maximum":        {ascendingEdges(MaxHistogramBuckets + 1), true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := ValidateHistogramBuckets(tc.edges)
@@ -179,4 +181,28 @@ func bucketCounts(histogram *dto.Histogram) []uint64 {
 		counts = append(counts, bucket.GetCumulativeCount())
 	}
 	return counts
+}
+
+// ascendingEdges builds a strictly increasing ladder of n boundaries, for the
+// cases where only the number of boundaries is under test.
+func ascendingEdges(n int) []float64 {
+	edges := make([]float64, 0, n)
+	for i := 1; i <= n; i++ {
+		edges = append(edges, float64(i)*0.001)
+	}
+	return edges
+}
+
+// TestMaxHistogramBucketsLeavesRoomAboveTheDefaults keeps the limit and the
+// default ladders in a fixed relationship, so extending a default ladder stays
+// well inside the limit.
+func TestMaxHistogramBucketsLeavesRoomAboveTheDefaults(t *testing.T) {
+	for name, edges := range map[string][]float64{
+		"request_streaming_tpot_seconds": DefaultRequestTPOTBuckets,
+		"request_streaming_itl_seconds":  DefaultInterTokenLatencyBuckets,
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Greater(t, MaxHistogramBuckets, 2*len(edges))
+		})
+	}
 }

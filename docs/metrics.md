@@ -151,17 +151,19 @@ schedulingProfiles:
 
 Both histograms are process-wide and are built once during metric registration, which happens
 after the configuration file is parsed, so this is a global setting rather than a plugin
-parameter. Edges are in seconds and must be finite, positive and strictly increasing; the
-`+Inf` bucket is implicit, and an invalid list fails startup rather than falling back
-silently. **A histogram whose key is omitted uses the refined default edges described above**,
-and setting one key does not change the other. An explicitly empty list is rejected, so a
-typo cannot silently restore the defaults.
+parameter. Edges are in seconds and must be finite, positive and strictly increasing, and a
+ladder is limited to 64 edges; the `+Inf` bucket is implicit, and an invalid list fails startup
+rather than falling back silently. **A histogram whose key is omitted uses the refined default
+edges described above**, and setting one key does not change the other. An explicitly empty
+list is rejected, so a typo cannot silently restore the defaults.
 
 Longer ladders increase series cardinality and can affect rolling-upgrade query windows:
 
 - **Cardinality.** Every edge is one more series per label combination, on top of `_sum` and
   `_count`, so the cost scales with the number of distinct
   `model_name`/`target_model_name`/`fairness_id`/`priority` combinations a deployment produces.
+  The 64-edge limit bounds that growth; it leaves room above both default ladders, which have
+  25 and 21 edges.
 - **Rolling upgrades.** Pods on the old and new layouts expose different `le` sets at the same
   time, so a query window spanning both can combine two bucket layouts until the rollout
   finishes.

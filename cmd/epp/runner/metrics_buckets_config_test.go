@@ -27,6 +27,11 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/epp/config/loader"
 )
 
+// metricsRegisterOptions only translates an already-validated configuration;
+// the edges are rejected in pkg/epp/config/loader, which both startup paths
+// reach first. The cases here are the mapping's own branches: a ladder that was
+// left out keeps its built-in edges, and a configured ladder is passed through
+// without touching the other one.
 func TestMetricsRegisterOptionsFromConfig(t *testing.T) {
 	tpot := []float64{0.005, 0.01, 0.02}
 	itl := []float64{0.001, 0.002}
@@ -36,7 +41,6 @@ func TestMetricsRegisterOptionsFromConfig(t *testing.T) {
 		config   *configapiv1.EndpointPickerConfig
 		wantTPOT []float64
 		wantITL  []float64
-		wantErr  string
 	}{
 		{
 			name:   "nil config keeps the built-in edges",
@@ -73,40 +77,11 @@ func TestMetricsRegisterOptionsFromConfig(t *testing.T) {
 			}},
 			wantITL: itl,
 		},
-		{
-			name: "an explicitly empty list is rejected rather than ignored",
-			config: &configapiv1.EndpointPickerConfig{Metrics: &configapiv1.MetricsConfig{
-				RequestTPOTBuckets: []float64{},
-			}},
-			wantErr: "metrics.requestTPOTBuckets: at least one bucket boundary is required",
-		},
-		{
-			name: "non-increasing edges are rejected",
-			config: &configapiv1.EndpointPickerConfig{Metrics: &configapiv1.MetricsConfig{
-				RequestTPOTBuckets: []float64{0.01, 0.01},
-			}},
-			wantErr: "metrics.requestTPOTBuckets: bucket boundary 1 is 0.01, want a value greater than the preceding 0.01",
-		},
-		{
-			name: "a non-positive edge is rejected",
-			config: &configapiv1.EndpointPickerConfig{Metrics: &configapiv1.MetricsConfig{
-				RequestITLBuckets: []float64{0, 0.01},
-			}},
-			wantErr: "metrics.requestITLBuckets: bucket boundary 0 is 0, want a positive value",
-		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := metricsRegisterOptions(tc.config)
-			if tc.wantErr != "" {
-				require.Error(t, err)
-				assert.EqualError(t, err, tc.wantErr)
-				assert.Empty(t, got.RequestTPOTBuckets, "no options are returned alongside an error")
-				assert.Empty(t, got.RequestITLBuckets, "no options are returned alongside an error")
-				return
-			}
-			require.NoError(t, err)
+			got := metricsRegisterOptions(tc.config)
 			assert.Equal(t, tc.wantTPOT, got.RequestTPOTBuckets)
 			assert.Equal(t, tc.wantITL, got.RequestITLBuckets)
 		})
@@ -133,70 +108,7 @@ schedulingProfiles:
 	require.NoError(t, err)
 	require.NotNil(t, rawConfig.Metrics)
 
-	got, err := metricsRegisterOptions(rawConfig)
-	require.NoError(t, err)
+	got := metricsRegisterOptions(rawConfig)
 	assert.Equal(t, []float64{0.005, 0.01, 0.02}, got.RequestTPOTBuckets)
 	assert.Equal(t, []float64{0.001, 0.002}, got.RequestITLBuckets)
-}
-
-// An omitted key, an explicit null and an explicit empty list are three
-// different inputs, and only the last one is an error. This pins the decoding
-// step as well as the check: a YAML empty list has to survive as a non-nil
-// empty slice, because that is what separates "left at the defaults" from
-// "configured with nothing".
-func TestMetricsBucketsEmptyListIsNotTheSameAsOmitted(t *testing.T) {
-	testCases := []struct {
-		name            string
-		metricsFragment string
-		wantSectionNil  bool
-		wantEdgesNil    bool
-		wantErr         string
-	}{
-		{
-			name:           "section omitted",
-			wantSectionNil: true,
-		},
-		{
-			name:            "section present but empty",
-			metricsFragment: "metrics: {}\n",
-			wantEdgesNil:    true,
-		},
-		{
-			name:            "key set to null",
-			metricsFragment: "metrics:\n  requestTPOTBuckets: null\n",
-			wantEdgesNil:    true,
-		},
-		{
-			name:            "key set to an empty list",
-			metricsFragment: "metrics:\n  requestTPOTBuckets: []\n",
-			wantErr:         "metrics.requestTPOTBuckets: at least one bucket boundary is required",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			configText := "apiVersion: llm-d.ai/v1\nkind: EndpointPickerConfig\n" + tc.metricsFragment +
-				"plugins:\n- type: single-profile-handler\nschedulingProfiles:\n- name: default\n  plugins: []\n"
-			rawConfig, _, err := loader.LoadRawConfig([]byte(configText), testr.New(t))
-			require.NoError(t, err)
-
-			if tc.wantSectionNil {
-				require.Nil(t, rawConfig.Metrics)
-			} else {
-				require.NotNil(t, rawConfig.Metrics)
-				assert.Equal(t, tc.wantEdgesNil, rawConfig.Metrics.RequestTPOTBuckets == nil,
-					"an empty YAML list must decode to a non-nil empty slice, an omitted key to nil")
-				assert.Empty(t, rawConfig.Metrics.RequestTPOTBuckets)
-			}
-
-			got, err := metricsRegisterOptions(rawConfig)
-			if tc.wantErr != "" {
-				require.Error(t, err)
-				assert.EqualError(t, err, tc.wantErr)
-				return
-			}
-			require.NoError(t, err)
-			assert.Empty(t, got.RequestTPOTBuckets)
-		})
-	}
 }
