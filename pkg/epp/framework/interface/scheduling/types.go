@@ -79,6 +79,9 @@ func (r *InferenceRequest) String() string {
 }
 
 type Endpoint interface {
+	// GetMetadata and GetMetrics return snapshots that may be shared with the
+	// datastore and with concurrent requests. Callers must treat them as
+	// read-only and Clone before modifying.
 	GetMetadata() *fwkdl.EndpointMetadata
 	GetMetrics() *fwkdl.Metrics
 	String() string
