@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
+	"github.com/llm-d/llm-d-router/pkg/common/routing"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 )
@@ -307,13 +308,11 @@ func (p *discoveredEndpointPicker) resolveRenderPort(meta *fwkdl.EndpointMetadat
 		if !rule.selector.Matches(labels.Set(meta.Labels)) {
 			continue
 		}
-		if meta.RankIndex < 0 {
-			return "", fmt.Errorf("discovered endpoint %s has invalid rank index %d", meta.ID, meta.RankIndex)
+		port, ok := routing.RankPort(rule.basePort, meta.RankIndex)
+		if !ok {
+			return "", fmt.Errorf("discovered endpoint %s has invalid rank index %d: resolved render port from base %d outside 1-65535", meta.ID, meta.RankIndex, rule.basePort)
 		}
-		if meta.RankIndex > 65535-rule.basePort {
-			return "", fmt.Errorf("discovered endpoint %s resolved render port outside 1-65535", meta.ID)
-		}
-		return strconv.Itoa(rule.basePort + meta.RankIndex), nil
+		return strconv.Itoa(port), nil
 	}
 	return "", fmt.Errorf("discovered endpoint %s does not match any port rule", meta.ID)
 }
