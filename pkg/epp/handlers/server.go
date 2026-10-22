@@ -90,6 +90,11 @@ func (s *StreamingServer) SetEmitEndpointScores(enabled bool) {
 	s.emitEndpointScores = enabled
 }
 
+// SetToolCallingTelemetryEnabled controls tool-specific request and response observations.
+func (s *StreamingServer) SetToolCallingTelemetryEnabled(enabled bool) {
+	s.toolCallingTelemetryEnabled = enabled
+}
+
 // SetResponders sets the plugins that may answer a request instead of routing it. They are
 // asked in the given order.
 func (s *StreamingServer) SetResponders(responders []fwkrc.Responder) {
@@ -119,7 +124,8 @@ type StreamingServer struct {
 	maxPoolBufferSize int
 	// emitEndpointScores enables emitting per-endpoint scheduler scores in the request-path
 	// dynamic metadata. Off by default; set via SetEmitEndpointScores.
-	emitEndpointScores bool
+	emitEndpointScores          bool
+	toolCallingTelemetryEnabled bool
 	// responders may answer a request instead of routing it. Empty unless set via SetResponders.
 	responders []fwkrc.Responder
 }
@@ -592,7 +598,11 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 					err = errcommon.Error{Code: errcommon.BadRequest, Msg: resolveErr.Error()}
 					break
 				}
-				apiType, hasToolCallingAPI := toolCallingAPIForPath(fwkrequest.GetRequestPath(reqCtx.Request.Headers))
+				var apiType reqcommon.APIType
+				hasToolCallingAPI := false
+				if s.toolCallingTelemetryEnabled {
+					apiType, hasToolCallingAPI = toolCallingAPIForPath(fwkrequest.GetRequestPath(reqCtx.Request.Headers))
+				}
 				before := time.Now()
 				parseResult, parseErr := parser.ParseRequest(ctx, reqCtx.Request.RawBody, reqCtx.Request.Headers)
 				metrics.RecordPluginProcessingLatency(fwkrh.RequestParsingExtensionPoint, parser.TypedName().Type, parser.TypedName().Name, time.Since(before))
@@ -629,6 +639,9 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 					break
 				}
 
+				if s.toolCallingTelemetryEnabled {
+					ctx = toolcalling.WithTelemetryEnabled(ctx)
+				}
 				reqCtx, err = s.director.HandleRequest(ctx, reqCtx, parseResult.Body)
 				// The Director may resolve agent identity after this request span opened.
 				tracing.AttributeRequest(ctx, span)

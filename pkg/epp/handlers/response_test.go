@@ -306,6 +306,7 @@ func TestProcessRetainsToolCallingTelemetryOnResponseTermination(t *testing.T) {
 			failTrailerSend      bool
 			wantForwardedMissing bool
 			unsampled            bool
+			telemetryDisabled    bool
 			evicted              bool
 			streamRequest        bool
 		}{
@@ -321,6 +322,7 @@ func TestProcessRetainsToolCallingTelemetryOnResponseTermination(t *testing.T) {
 			{name: "SSE completed through trailers", eventStream: true, body: toolEvent, trailers: true, terminalErr: io.EOF, wantPresent: true},
 			{name: "SSE unfinished event through trailers", eventStream: true, body: strings.TrimSuffix(toolEvent, "\n"), trailers: true, terminalErr: io.EOF, unreadable: true},
 			{name: "completed JSON", body: toolJSON, endOfStream: true, terminalErr: io.EOF, wantPresent: true},
+			{name: "telemetry disabled", body: toolJSON, endOfStream: true, terminalErr: io.EOF, telemetryDisabled: true},
 			{name: "malformed SSE at EOS", eventStream: true, body: "data: {invalid json}\n\n", endOfStream: true, terminalErr: io.EOF, unreadable: true},
 			{name: "truncated JSON at EOS", body: `{"choices":[`, endOfStream: true, terminalErr: io.EOF, unreadable: true},
 			{name: "non-tool request", body: `{"choices":[]}`, terminalErr: io.EOF, nonTool: true},
@@ -411,6 +413,7 @@ func TestProcessRetainsToolCallingTelemetryOnResponseTermination(t *testing.T) {
 				}
 				registry := NewParserRegistry([]fwkrh.Parser{openai.NewOpenAIParser(), anthropic.NewAnthropicParser()}, logr.Discard())
 				server := NewStreamingServer(nil, &mockDirector{stream: tt.streamRequest}, registry, 0)
+				server.SetToolCallingTelemetryEnabled(!tt.telemetryDisabled)
 				if tt.evicted {
 					server.SetEvictChannelLookup(responseEvictLookup{srv.evictCh})
 				}
@@ -457,7 +460,7 @@ func TestProcessRetainsToolCallingTelemetryOnResponseTermination(t *testing.T) {
 					string(semconv.LLMDToolCallingResponseUpstreamDetectionIncompleteKey):  (!tt.endOfStream && !tt.trailers) || tt.unreadable,
 					string(semconv.LLMDToolCallingResponseForwardedDetectionIncompleteKey): (!tt.endOfStream && !tt.trailers) || tt.unreadable || tt.failBodySend > 0 || tt.failTrailerSend,
 				} {
-					if tt.nonTool || tt.skipResponse {
+					if tt.nonTool || tt.skipResponse || tt.telemetryDisabled {
 						require.NotContains(t, attributes, key)
 						continue
 					}

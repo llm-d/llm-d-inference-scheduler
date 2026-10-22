@@ -309,7 +309,9 @@ func TestProcessToolCallingPassthroughWithNonRecordingSpan(t *testing.T) {
 							srv.reqs = append(srv.reqs, &extProcPb.ProcessingRequest{Request: &extProcPb.ProcessingRequest_ResponseBody{ResponseBody: &extProcPb.HttpBody{Body: []byte(chunk), EndOfStream: i == len(chunks)-1}}})
 						}
 						registry := NewParserRegistry([]fwkrh.Parser{openai.NewOpenAIParser(), anthropic.NewAnthropicParser()}, logr.Discard())
-						require.NoError(t, NewStreamingServer(nil, &mockDirector{}, registry, 0).Process(srv))
+						server := NewStreamingServer(nil, &mockDirector{}, registry, 0)
+						server.SetToolCallingTelemetryEnabled(true)
+						require.NoError(t, server.Process(srv))
 
 						var forwardedRequest, forwardedResponse []byte
 						for _, sent := range srv.sentResponses {
@@ -474,7 +476,9 @@ func TestProcessExportsToolCallingTelemetryOverOTLP(t *testing.T) {
 					srv.reqs = append(srv.reqs, &extProcPb.ProcessingRequest{Request: &extProcPb.ProcessingRequest_ResponseBody{ResponseBody: &extProcPb.HttpBody{Body: []byte(chunk), EndOfStream: i == len(chunks)-1}}})
 				}
 				registry := NewParserRegistry([]fwkrh.Parser{openai.NewOpenAIParser(), anthropic.NewAnthropicParser()}, logr.Discard())
-				require.NoError(t, NewStreamingServer(nil, &mockDirector{}, registry, 0).Process(srv))
+				server := NewStreamingServer(nil, &mockDirector{}, registry, 0)
+				server.SetToolCallingTelemetryEnabled(true)
+				require.NoError(t, server.Process(srv))
 
 				var forwardedRequest, forwardedResponse []byte
 				outboundTraceparent := ""

@@ -18,6 +18,7 @@ package toolcalling
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -111,6 +112,19 @@ type RequestSnapshot struct {
 	surface reqcommon.APIType
 	fields  map[Field]capturedField
 	summary RequestSummary
+}
+
+type telemetryEnabledContextKey struct{}
+
+// WithTelemetryEnabled lets downstream request processing observe tool fields.
+func WithTelemetryEnabled(ctx context.Context) context.Context {
+	return context.WithValue(ctx, telemetryEnabledContextKey{}, true)
+}
+
+// TelemetryEnabled reports whether tool-specific observations are enabled.
+func TelemetryEnabled(ctx context.Context) bool {
+	enabled, _ := ctx.Value(telemetryEnabledContextKey{}).(bool)
+	return enabled
 }
 
 // CanSkipCapture reports whether an empty snapshot and a body without JSON

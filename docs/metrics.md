@@ -196,6 +196,9 @@ an exemplar link configured to a traces backend.
 
 ### Tool-calling request integrity
 
+EPP collects tool-calling telemetry when `--enable-tool-calling-telemetry` is set. The
+flag defaults to false. Trace export also requires tracing to be enabled.
+
 This counter records observed outcomes for supported tool-calling request fields. It does not
 include field values or request content.
 
