@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"go.opentelemetry.io/otel/trace"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
@@ -191,51 +190,10 @@ func RecordRequestLatencies(ctx context.Context, modelName, targetModelName, fai
 		return false
 	}
 	elapsedSeconds := complete.Sub(received).Seconds()
-	observeWithTraceExemplar(ctx,
+	metricsutil.ObserveWithTraceExemplar(ctx,
 		llmdRequestLatencies.WithLabelValues(modelName, targetModelName, fairnessID, priority),
 		elapsedSeconds)
 	return true
-}
-
-// Exemplar label names. Grafana links exemplars to traces by the trace_id label
-// name, so don't rename it.
-const (
-	exemplarTraceIDLabel = "trace_id"
-	exemplarSpanIDLabel  = "span_id"
-)
-
-// observeWithTraceExemplar records an observation and attaches the request's
-// trace as a Prometheus exemplar, so a point on a latency graph links to its trace.
-//
-// Nothing is attached for unsampled spans: they have a trace ID, but no trace was
-// exported, so the link would go nowhere.
-//
-// span_id is only added when the span is recording, meaning the EPP started it.
-// With EPP tracing off the context still holds the caller's span, which isn't
-// the EPP's, so only trace_id is attached.
-//
-// Exemplars only reach the wire over OpenMetrics; see newMetricsServerOptions
-// in cmd/epp/runner.
-func observeWithTraceExemplar(ctx context.Context, observer prometheus.Observer, value float64) {
-	exemplarObserver, ok := observer.(prometheus.ExemplarObserver)
-	if !ok {
-		observer.Observe(value)
-		return
-	}
-
-	span := trace.SpanFromContext(ctx)
-	spanCtx := span.SpanContext()
-	if !spanCtx.IsSampled() {
-		observer.Observe(value)
-		return
-	}
-
-	// trace_id + span_id is 63 runes, under OpenMetrics' 128-rune exemplar limit.
-	labels := prometheus.Labels{exemplarTraceIDLabel: spanCtx.TraceID().String()}
-	if span.IsRecording() {
-		labels[exemplarSpanIDLabel] = spanCtx.SpanID().String()
-	}
-	exemplarObserver.ObserveWithExemplar(value, labels)
 }
 
 // RecordResponseSizes records the response sizes.
@@ -287,7 +245,7 @@ func RecordNormalizedTimePerOutputToken(ctx context.Context, modelName, targetMo
 	elapsedSeconds := complete.Sub(received).Seconds()
 	secondsPerToken := elapsedSeconds / float64(outputTokenCount)
 
-	observeWithTraceExemplar(ctx, llmdNormalizedTimePerOutputToken.WithLabelValues(modelName, targetModelName, fairnessID, priority), secondsPerToken)
+	metricsutil.ObserveWithTraceExemplar(ctx, llmdNormalizedTimePerOutputToken.WithLabelValues(modelName, targetModelName, fairnessID, priority), secondsPerToken)
 	return true
 }
 
@@ -309,7 +267,7 @@ func RecordRequestTTFT(ctx context.Context, modelName, targetModelName, fairness
 		streamingLabel = "true"
 	}
 	ttftSeconds := firstToken.Sub(received).Seconds()
-	observeWithTraceExemplar(ctx, llmdRequestTTFT.WithLabelValues(modelName, targetModelName, fairnessID, priority, streamingLabel), ttftSeconds)
+	metricsutil.ObserveWithTraceExemplar(ctx, llmdRequestTTFT.WithLabelValues(modelName, targetModelName, fairnessID, priority, streamingLabel), ttftSeconds)
 	return true
 }
 
@@ -338,7 +296,7 @@ func RecordRequestTPOT(ctx context.Context, modelName, targetModelName, fairness
 	e2eSeconds := complete.Sub(received).Seconds()
 	ttftSeconds := firstToken.Sub(received).Seconds()
 	tpotSeconds := (e2eSeconds - ttftSeconds) / float64(outputTokenCount-1)
-	observeWithTraceExemplar(ctx, llmdRequestTPOT.WithLabelValues(modelName, targetModelName, fairnessID, priority), tpotSeconds)
+	metricsutil.ObserveWithTraceExemplar(ctx, llmdRequestTPOT.WithLabelValues(modelName, targetModelName, fairnessID, priority), tpotSeconds)
 	return true
 }
 
@@ -351,7 +309,7 @@ func RecordInterTokenLatency(ctx context.Context, modelName, targetModelName, fa
 			"modelName", modelName, "targetModelName", targetModelName, "itlSeconds", itlSeconds)
 		return false
 	}
-	observeWithTraceExemplar(ctx, llmdInterTokenLatency.WithLabelValues(modelName, targetModelName, fairnessID, priority), itlSeconds)
+	metricsutil.ObserveWithTraceExemplar(ctx, llmdInterTokenLatency.WithLabelValues(modelName, targetModelName, fairnessID, priority), itlSeconds)
 	return true
 }
 
@@ -403,7 +361,7 @@ func RecordInferencePoolReadyPods(name string, runningPods float64) {
 
 // RecordSchedulerE2ELatency records the end-to-end scheduling latency.
 func RecordSchedulerE2ELatency(ctx context.Context, duration time.Duration) {
-	observeWithTraceExemplar(ctx, llmdSchedulerE2ELatency.WithLabelValues(), duration.Seconds())
+	metricsutil.ObserveWithTraceExemplar(ctx, llmdSchedulerE2ELatency.WithLabelValues(), duration.Seconds())
 }
 
 // RecordRequestProcessingLatency records the EPP request processing latency,
@@ -479,7 +437,7 @@ func RecordFlowControlRequestQueueDuration(
 ) {
 	fairnessID = boundFairnessID(fairnessID)
 	modelName, targetModelName = boundModels(modelName, targetModelName)
-	observeWithTraceExemplar(ctx, llmdFlowControlRequestQueueDuration.WithLabelValues(
+	metricsutil.ObserveWithTraceExemplar(ctx, llmdFlowControlRequestQueueDuration.WithLabelValues(
 		fairnessID, priority, outcome,
 		inferencePool,
 		modelName, targetModelName,
