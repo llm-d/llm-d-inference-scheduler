@@ -151,9 +151,11 @@ const (
 	// in vLLM, we will have 500K / 16 = 31.25K blocks.
 	defaultLRUCapacityPerServer = 31250
 
-	// defaultMaxSyncedHashes caps the recent-window published per endpoint when
-	// cross-replica sync is enabled.
-	defaultMaxSyncedHashes = 256
+	// defaultMaxSyncedTokens caps the recent-window published per endpoint when
+	// cross-replica sync is enabled. Sized to the default per-pod index
+	// (defaultLRUCapacityPerServer blocks × defaultBlockSizeTokens) so one
+	// replica can publish a full index's worth of recent hashes for an endpoint.
+	defaultMaxSyncedTokens = defaultLRUCapacityPerServer * defaultBlockSizeTokens
 )
 
 // config defines the configuration for the prefix cache plugins.
@@ -179,10 +181,11 @@ type config struct {
 	// SyncCrossReplicaState controls whether recent per-prompt prefix hashes are
 	// published through a configured CrossReplicaSyncer. Unset defaults to true.
 	SyncCrossReplicaState *bool `json:"syncCrossReplicaState,omitempty"`
-	// MaxSyncedHashes caps total hashes across prompts in each replica's
-	// per-endpoint recent window. Aggregate does not re-apply this cap to the
-	// union of replicas. Unset or <= 0 defaults to defaultMaxSyncedHashes.
-	MaxSyncedHashes int `json:"maxSyncedHashes,omitempty"`
+	// MaxSyncedTokens caps total tokens across prompts in each replica's
+	// per-endpoint recent window (converted to hashes via blockSizeTokens).
+	// Aggregate does not re-apply this cap to the union of replicas. Unset or
+	// <= 0 defaults to defaultMaxSyncedTokens.
+	MaxSyncedTokens int `json:"maxSyncedTokens,omitempty"`
 }
 
 // defaultConfig provides sensible defaults for the prefix cache plugins.
@@ -193,5 +196,5 @@ var defaultConfig = config{
 	MaxPrefixBlocksToMatch: defaultMaxPrefixBlocks,
 	MaxPrefixTokensToMatch: defaultMaxPrefixTokens,
 	LRUCapacityPerServer:   defaultLRUCapacityPerServer,
-	MaxSyncedHashes:        defaultMaxSyncedHashes,
+	MaxSyncedTokens:        defaultMaxSyncedTokens,
 }

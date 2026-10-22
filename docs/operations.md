@@ -101,15 +101,18 @@ sync interval (default `200ms`, `publishTimeout` default `1s`).
 
 **Request-path `Produce` (96 decode pods, `sharedPrefix` layout, Apple M5 Pro):**
 
+Default window budget is `maxSyncedTokens` = 2_000_000 (31250 hashes at
+`blockSizeTokens` = 64), matching `lruCapacityPerServer`.
+
 | Mode | Median of 5 | Allocs/op | Relative to sync off |
 | --- | ---: | ---: | ---: |
-| `syncCrossReplicaState=false` | 35 µs | 424 | 1.0x |
-| Syncer configured, empty peer window | 36 µs | 424 | 1.0x |
-| Syncer configured, steady peer window (`maxSyncedHashes`=256 worth of prompts on every pod, already merged) | 40 µs | 520 | 1.15x |
+| `syncCrossReplicaState=false` | 44 µs | 424 | 1.0x |
+| Syncer configured, empty peer window | 41 µs | 424 | 0.95x |
+| Syncer configured, steady peer window (default `maxSyncedTokens` worth of hashes on every pod, already merged) | 27 µs | 500 | 0.61x |
 
 Empty-window overhead is a `syncerActive` check plus a miss on the optional
 attribute. Steady-state merge skips work when the sync attribute digest is
-unchanged (Peek + cached `ContentDigest`), so cost stays close to sync-off.
+unchanged (Peek + cached `ContentDigest`), so cost stays at or below sync-off.
 Novel prompts (window slides) pay snapshot, prompt-key, and indexer `Add` work.
 Reproduce with:
 
@@ -138,7 +141,7 @@ Operational takeaways:
 
 - Steady peer windows are cheap on the request path when the attribute is
   unchanged; cost spikes when the window slides (novel peer prompts). Prefer
-  sizing `maxSyncedHashes` for publish payload and hit-rate, not for steady CPU.
+  sizing `maxSyncedTokens` for publish payload and hit-rate, not for steady CPU.
 - Publish latency is on the sync interval, not in `Produce`. Keep `stateTTL`
   above the refresh interval plus observed publish RTT (include Redis/Valkey
   network time in cluster measurements).

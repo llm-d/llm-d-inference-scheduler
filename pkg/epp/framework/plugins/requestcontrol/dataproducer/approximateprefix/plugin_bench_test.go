@@ -135,9 +135,9 @@ func BenchmarkProduce(b *testing.B) {
 // peer window already folded into peerMerged (the common hot-path case).
 func BenchmarkProduceCrossSync(b *testing.B) {
 	const (
-		numPods       = 96
-		peerPrompts   = 4
-		hashesPerPrompt = 64 // peerPrompts*hashesPerPrompt == defaultMaxSyncedHashes
+		numPods         = 96
+		peerPrompts     = 1
+		hashesPerPrompt = defaultLRUCapacityPerServer // default maxSyncedTokens / blockSizeTokens
 	)
 	syncOn := true
 	syncOff := false
@@ -150,18 +150,36 @@ func BenchmarkProduceCrossSync(b *testing.B) {
 	}
 	modes := []mode{
 		{
-			name:   "syncOff",
-			cfg:    func() config { c := defaultConfig; c.SyncCrossReplicaState = &syncOff; c.AutoTune = false; c.BlockSizeTokens = benchBlockSize; return c }(),
+			name: "syncOff",
+			cfg: func() config {
+				c := defaultConfig
+				c.SyncCrossReplicaState = &syncOff
+				c.AutoTune = false
+				c.BlockSizeTokens = benchBlockSize
+				return c
+			}(),
 			handle: testHandle(),
 		},
 		{
-			name:   "syncOnEmpty",
-			cfg:    func() config { c := defaultConfig; c.SyncCrossReplicaState = &syncOn; c.AutoTune = false; c.BlockSizeTokens = benchBlockSize; return c }(),
+			name: "syncOnEmpty",
+			cfg: func() config {
+				c := defaultConfig
+				c.SyncCrossReplicaState = &syncOn
+				c.AutoTune = false
+				c.BlockSizeTokens = benchBlockSize
+				return c
+			}(),
 			handle: testHandleWithSyncer(),
 		},
 		{
-			name:   "syncOnSteady",
-			cfg:    func() config { c := defaultConfig; c.SyncCrossReplicaState = &syncOn; c.AutoTune = false; c.BlockSizeTokens = benchBlockSize; return c }(),
+			name: "syncOnSteady",
+			cfg: func() config {
+				c := defaultConfig
+				c.SyncCrossReplicaState = &syncOn
+				c.AutoTune = false
+				c.BlockSizeTokens = benchBlockSize
+				return c
+			}(),
 			handle: testHandleWithSyncer(),
 			peers:  true,
 		},

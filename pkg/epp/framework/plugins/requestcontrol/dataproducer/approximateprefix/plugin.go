@@ -220,10 +220,7 @@ func newDataProducer(ctx context.Context, name string, config config, handle plu
 	if config.SyncCrossReplicaState != nil {
 		syncCrossReplicaState = *config.SyncCrossReplicaState
 	}
-	maxSynced := config.MaxSyncedHashes
-	if maxSynced <= 0 {
-		maxSynced = defaultMaxSyncedHashes
-	}
+	maxSynced := syncedHashBudget(config)
 
 	p := &dataProducer{
 		typedName: plugin.TypedName{
@@ -243,6 +240,24 @@ func newDataProducer(ctx context.Context, name string, config config, handle plu
 	go p.CleanUpInactivePods(ctx, handle)
 
 	return p, nil
+}
+
+// syncedHashBudget converts MaxSyncedTokens into a hash-count cap for the
+// recent window. Unset MaxSyncedTokens uses defaultMaxSyncedTokens.
+func syncedHashBudget(cfg config) int {
+	blockSize := cfg.BlockSizeTokens
+	if blockSize <= 0 {
+		blockSize = defaultBlockSizeTokens
+	}
+	tokens := cfg.MaxSyncedTokens
+	if tokens <= 0 {
+		tokens = defaultMaxSyncedTokens
+	}
+	n := tokens / blockSize
+	if n <= 0 {
+		return 1
+	}
+	return n
 }
 
 // syncerActive is true when this producer should publish/merge cross-replica
@@ -599,7 +614,7 @@ func (p *dataProducer) CrossReplicaState() datalayer.CrossReplicaSpec {
 		},
 		Aggregate: func(values []any) any {
 			// Each input is already capped by the publishing replica's
-			// maxSyncedHashes. Do not re-trim the union: redis-syncer orders
+			// maxSyncedTokens. Do not re-trim the union: redis-syncer orders
 			// peer fields by replica ID, so a global cap would drop whole
 			// replicas rather than oldest prompts.
 			seen := make(map[string]struct{})

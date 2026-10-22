@@ -32,7 +32,7 @@ type recentWindow struct {
 
 func newRecentWindow(max int) *recentWindow {
 	if max <= 0 {
-		max = defaultMaxSyncedHashes
+		max = defaultLRUCapacityPerServer
 	}
 	return &recentWindow{
 		pending: make(map[string][][]blockHash),

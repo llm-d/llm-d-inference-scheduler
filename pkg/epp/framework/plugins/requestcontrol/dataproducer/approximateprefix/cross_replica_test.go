@@ -74,7 +74,7 @@ func TestCrossReplicaMergeLetsPeerMatch(t *testing.T) {
 	cfg.SyncCrossReplicaState = &syncOn
 	cfg.AutoTune = false
 	cfg.BlockSizeTokens = 64
-	cfg.MaxSyncedHashes = 64
+	cfg.MaxSyncedTokens = 64 * 64 // 64 hashes at BlockSizeTokens=64
 	cfg.LRUCapacityPerServer = 100
 
 	ctx := context.Background()
@@ -317,7 +317,8 @@ func TestCrossReplicaAggregateUnionsReplicas(t *testing.T) {
 	cfg.SyncCrossReplicaState = &syncOn
 	cfg.AutoTune = false
 	cfg.LRUCapacityPerServer = 100
-	cfg.MaxSyncedHashes = 3
+	cfg.BlockSizeTokens = 64
+	cfg.MaxSyncedTokens = 3 * 64 // 3 hashes
 	producer, err := newDataProducer(context.Background(), ApproxPrefixCachePluginType, cfg, testHandleWithSyncer())
 	require.NoError(t, err)
 
@@ -339,7 +340,8 @@ func TestCrossReplicaAggregateKeepsAllReplicas(t *testing.T) {
 	cfg := defaultConfig
 	cfg.SyncCrossReplicaState = &syncOn
 	cfg.AutoTune = false
-	cfg.MaxSyncedHashes = 1
+	cfg.BlockSizeTokens = 64
+	cfg.MaxSyncedTokens = 64 // 1 hash
 	producer, err := newDataProducer(context.Background(), ApproxPrefixCachePluginType, cfg, testHandleWithSyncer())
 	require.NoError(t, err)
 
