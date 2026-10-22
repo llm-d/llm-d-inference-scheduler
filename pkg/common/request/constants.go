@@ -35,7 +35,7 @@ const (
 	// from the prefill EPP's response, through the coordinator, to the decode
 	// EPP's request, for topology-affinity-filter and topology-affinity-scorer
 	// running in coordinator deployments.
-	PeerTopologyHeaderKey = "x-peer-topology"
+	PeerTopologyHeaderKey = "x-llm-d-peer-topology"
 
 	// DefaultFairnessID is the default fairness ID used when no ID is provided in the request.
 	// This ensures that requests without explicit fairness identifiers are still grouped and managed by the Flow Control
@@ -62,6 +62,8 @@ const (
 	FieldStream               = "stream"
 	FieldStreamOptions        = "stream_options"
 	FieldEcho                 = "echo"
+	FieldTools                = "tools"
+	FieldToolChoice           = "tool_choice"
 	FieldSamplingParams       = "sampling_params"
 	FieldDoRemotePrefill      = "do_remote_prefill"
 	FieldDoRemoteDecode       = "do_remote_decode"
@@ -119,6 +121,9 @@ const (
 	SSEDoneMarker = "[DONE]"
 	SSEDone       = SSEDataPrefix + SSEDoneMarker
 )
+
+// ToolChoiceNone is the tool_choice value that forbids the model from calling a tool.
+const ToolChoiceNone = "none"
 
 // Content part types, the values a content part's FieldType takes. A
 // chat-completions *_url part nests its URL and options under one object keyed

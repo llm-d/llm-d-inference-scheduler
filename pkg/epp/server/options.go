@@ -411,9 +411,8 @@ func ConfigureMetricsTLS(opts *Options, mo *metricsserver.Options) error {
 }
 
 func (opts *Options) Validate() error {
-	if (opts.PoolName != "" && opts.EndpointSelector != nil) || (opts.PoolName == "" && opts.EndpointSelector == nil) {
-		return errors.New("either pool-name or endpoint-selector must be set")
-	}
+	// pool-name and endpoint-selector are checked on the Kubernetes discovery
+	// path only; file discovery reads neither.
 	if opts.EndpointSelector != nil {
 		if len(opts.EndpointTargetPorts) == 0 || len(opts.EndpointTargetPorts) > 8 {
 			return fmt.Errorf("flag %q should have length from 1 to 8", "endpoint-target-ports")

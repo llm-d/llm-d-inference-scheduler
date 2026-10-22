@@ -28,6 +28,7 @@ import (
 	"math/big"
 	"mime"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -90,8 +91,7 @@ func (s *SGLangPDStep) Execute(ctx context.Context, rc *pipeline.RequestContext)
 			return fmt.Errorf("sglang-pd requires sampling_params.n=1: %w", pipeline.ErrBadRequest)
 		}
 	}
-	// EPP's JSON payload map decodes numbers as float64. Keep the room exactly
-	// representable through its request-body mutations on both requests.
+	// Keep the room exact through gateways that decode JSON numbers as float64.
 	room, err := rand.Int(rand.Reader, big.NewInt(1<<53))
 	if err != nil {
 		return fmt.Errorf("sglang-pd: create bootstrap room: %w", err)
@@ -164,7 +164,15 @@ func (s *SGLangPDStep) Execute(ctx context.Context, rc *pipeline.RequestContext)
 	}()
 	out := serveDecode(logger, s.gwClient.Transport(), rc.ResponseWriter, proxyReq, coordmetrics.UpstreamDecode, nil)
 	if err := context.Cause(decodeCtx); err != nil {
-		return &pipeline.UpstreamStreamedError{Step: SGLangPDStepName, Cause: err}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// serveDecode suppresses aborts on cancellation. Prefill failure leaves
+		// the client connected, so an already-started response must be aborted.
+		if out.Status != 0 {
+			panic(http.ErrAbortHandler)
+		}
+		return err
 	}
 	if err := out.streamedError(SGLangPDStepName); err != nil {
 		return err

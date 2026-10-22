@@ -166,7 +166,8 @@ func TestSGLangPDPrefillFailureCancelsDecode(t *testing.T) {
 			err = step.Execute(ctx, &pipeline.RequestContext{OriginalPath: reqcommon.PathSGLangGenerate, Stream: true,
 				Body: map[string]any{"text": "hello", "stream": true}, ResponseWriter: rec})
 			var streamed *pipeline.UpstreamStreamedError
-			require.ErrorAs(t, err, &streamed)
+			require.Error(t, err)
+			require.False(t, errors.As(err, &streamed), "no decode response was written; the server must send an error")
 			require.NoError(t, ctx.Err())
 			require.Contains(t, err.Error(), "prefill stream")
 			select {

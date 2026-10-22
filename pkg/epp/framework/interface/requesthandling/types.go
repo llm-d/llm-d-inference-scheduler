@@ -939,8 +939,13 @@ type AnthropicContentBlock struct {
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
 	// tool_result fields (user messages): the outcome of a tool_use call.
-	ToolUseID string           `json:"tool_use_id,omitempty"`
-	Content   AnthropicContent `json:"content,omitempty"`
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	// Content keeps raw JSON bytes because its shape depends on Type: a string
+	// or an array of blocks on tool_result and mcp_tool_result, an object on
+	// the server tool results (web_search_tool_result_error,
+	// bash_code_execution_result). Read a tool_result block's content with
+	// ToolResultContent.
+	Content json.RawMessage `json:"content,omitempty"`
 	// thinking field (assistant messages): extended-thinking replay.
 	Thinking string `json:"thinking,omitempty"`
 }
@@ -965,4 +970,19 @@ func (b AnthropicContentBlock) ImageSource() *AnthropicImageSource {
 		return nil
 	}
 	return src
+}
+
+// ToolResultContent decodes the content of a tool_result block, a string or
+// an array of blocks. It returns the zero value for other block types and for
+// a tool_result whose content is absent or does not decode. Each call decodes
+// Content again, so call it once per block.
+func (b AnthropicContentBlock) ToolResultContent() AnthropicContent {
+	if b.Type != reqcommon.BlockTypeToolResult {
+		return AnthropicContent{}
+	}
+	var content AnthropicContent
+	if err := json.Unmarshal(b.Content, &content); err != nil {
+		return AnthropicContent{}
+	}
+	return content
 }

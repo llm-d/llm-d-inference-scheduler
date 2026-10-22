@@ -128,6 +128,46 @@ Requests answered locally by a responder, such as `GET /v1/models`, are not coun
 `llm_d_epp_request_total` or `llm_d_epp_request_size_bytes`. A responder error is counted in
 `llm_d_epp_request_error_total` with empty `model_name` and `target_model_name` labels.
 
+#### Streaming latency buckets
+
+`llm_d_epp_request_streaming_tpot_seconds` and `llm_d_epp_request_streaming_itl_seconds` use
+5 ms bucket spacing from 5 ms through 50 ms, the range interactive decoding falls in, and keep
+the original edges outside it.
+
+Either ladder can be replaced independently, in the `metrics` section of the EPP
+configuration file:
+
+```yaml
+apiVersion: llm-d.ai/v1
+kind: EndpointPickerConfig
+metrics:
+  requestTPOTBuckets: [0.005, 0.01, 0.02]
+  requestITLBuckets: [0.005, 0.01]
+plugins:
+  # ...
+schedulingProfiles:
+  # ...
+```
+
+Both histograms are process-wide and are built once during metric registration, which happens
+after the configuration file is parsed, so this is a global setting rather than a plugin
+parameter. Edges are in seconds and must be finite, positive and strictly increasing, and a
+ladder is limited to 64 edges; the `+Inf` bucket is implicit, and an invalid list fails startup
+rather than falling back silently. **A histogram whose key is omitted uses the refined default
+edges described above**, and setting one key does not change the other. An explicitly empty
+list is rejected, so a typo cannot silently restore the defaults.
+
+Longer ladders increase series cardinality and can affect rolling-upgrade query windows:
+
+- **Cardinality.** Every edge is one more series per label combination, on top of `_sum` and
+  `_count`, so the cost scales with the number of distinct
+  `model_name`/`target_model_name`/`fairness_id`/`priority` combinations a deployment produces.
+  The 64-edge limit bounds that growth; it leaves room above both default ladders, which have
+  25 and 21 edges.
+- **Rolling upgrades.** Pods on the old and new layouts expose different `le` sets at the same
+  time, so a query window spanning both can combine two bucket layouts until the rollout
+  finishes.
+
 #### Exemplars
 
 Latency histograms whose notes say they carry a trace exemplar attach the request's
