@@ -96,7 +96,8 @@ func (detector *ResponseDetector) Observe(chunk []byte, endOfStream bool) bool {
 		return true
 	}
 
-	if detector.eventStream {
+	switch {
+	case detector.eventStream:
 		detector.observeSSE(chunk)
 		if endOfStream && !detector.toolCallPresent {
 			if len(detector.line) > 0 {
@@ -104,11 +105,11 @@ func (detector *ResponseDetector) Observe(chunk []byte, endOfStream bool) bool {
 			}
 			detector.detectionIncomplete = detector.detectionIncomplete || len(detector.eventData) > 0
 		}
-	} else if !endOfStream {
+	case !endOfStream:
 		detector.eventData = append(detector.eventData, chunk...)
-	} else if len(detector.eventData) == 0 {
+	case len(detector.eventData) == 0:
 		detector.observeJSON(chunk)
-	} else {
+	default:
 		detector.eventData = append(detector.eventData, chunk...)
 		detector.observeJSON(detector.eventData)
 	}
