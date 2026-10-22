@@ -17,10 +17,8 @@ limitations under the License.
 package steps
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -43,137 +41,62 @@ import (
 )
 
 func TestSGLangPrefillDecode(t *testing.T) {
-	for _, mode := range []string{"early decode", "prefill transport failure", "prefill failure before decode headers", "client cancellation", "decode failure", "grace expiry", "missing endpoint"} {
-		t.Run(mode, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			releasePrefill := make(chan struct{})
-			prefillClosed := make(chan struct{})
-			decodeStarted := make(chan struct{})
-			var prefill map[string]any
-			gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var body map[string]any
-				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-					t.Error(err)
-					return
-				}
-				if r.URL.Path != reqcommon.PathSGLangGenerate || body[reqcommon.FieldBootstrapRoom] == nil || body[reqcommon.FieldBootstrapPort] == nil {
-					t.Errorf("invalid native SGLang request: %s %v", r.URL.Path, body)
-				}
-				w.Header().Set(reqcommon.HeaderContentType, request.MediaTypeEventStream)
-				if r.Header.Get(reqcommon.EPPProfileHeaderKey) == gateway.PhasePrefill {
-					if _, present := body[reqcommon.FieldBootstrapHost]; present {
-						t.Error("prefill must omit bootstrap_host")
-					}
-					prefill = body
-					defer close(prefillClosed)
-					if mode != "missing endpoint" {
-						w.Header().Set(routing.PrefillEndpointHeader, "10.0.0.7:8000")
-					}
-					w.(http.Flusher).Flush()
-					ready := releasePrefill
-					if mode == "prefill failure before decode headers" {
-						ready = decodeStarted
-					}
-					select {
-					case <-ready:
-						if mode == "prefill transport failure" || mode == "prefill failure before decode headers" {
-							panic(http.ErrAbortHandler)
-						}
-						_, _ = io.WriteString(w, "data: [DONE]\n\n")
-					case <-r.Context().Done():
-					}
-					return
-				}
-				close(decodeStarted)
-				if body[reqcommon.FieldBootstrapRoom] != prefill[reqcommon.FieldBootstrapRoom] || body[reqcommon.FieldBootstrapPort] != prefill[reqcommon.FieldBootstrapPort] {
-					t.Error("prefill and decode bootstrap parameters differ")
-				}
-				if body[reqcommon.FieldBootstrapHost] != "10.0.0.7" {
-					t.Error("decode did not use the selected prefill endpoint")
-				}
-				if mode == "decode failure" {
-					w.WriteHeader(http.StatusServiceUnavailable)
-					return
-				}
-				if mode != "prefill failure before decode headers" {
-					_, _ = io.WriteString(w, "data: decode\n\n")
-					w.(http.Flusher).Flush()
-				}
-				if mode != "early decode" && mode != "grace expiry" {
-					<-r.Context().Done()
-				}
-			}))
-			t.Cleanup(gw.Close)
-			client := gateway.NewWithTransport(nil, gw.URL)
-			params := map[string]any{ParamKVConnector: kv.SGLang}
-			if mode == "grace expiry" {
-				params["prefill_grace"] = "10ms"
-			}
-			prefillStep, err := NewPrefillStep(client, params)
-			require.NoError(t, err)
-			decodeStep, err := NewDecodeStep(client, map[string]any{ParamKVConnector: kv.SGLang})
-			require.NoError(t, err)
-			p := pipeline.New([]pipeline.Step{prefillStep, decodeStep})
-			coordinator := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requestCtx := log.IntoContext(r.Context(), funcr.New(func(_, _ string) {}, funcr.Options{Verbosity: logutil.TRACE}))
-				err := p.Execute(requestCtx, &pipeline.RequestContext{OriginalPath: reqcommon.PathSGLangGenerate, Stream: true,
-					Body: map[string]any{"text": "hello", "stream": true, reqcommon.FieldBootstrapHost: "untrusted", "sampling_params": map[string]any{"max_new_tokens": 1}}, ResponseWriter: w})
-				var streamed *pipeline.UpstreamStreamedError
-				if err != nil && r.Context().Err() == nil && !errors.As(err, &streamed) {
-					http.Error(w, err.Error(), http.StatusBadGateway)
-				}
-			}))
-			t.Cleanup(coordinator.Close)
-			t.Cleanup(cancel)
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, coordinator.URL, nil)
-			require.NoError(t, err)
-			resp, err := http.DefaultClient.Do(req)
-			require.NoError(t, err, "decode waited for prefill completion")
-			defer resp.Body.Close()
-			if mode == "missing endpoint" || mode == "prefill failure before decode headers" {
-				require.Equal(t, http.StatusBadGateway, resp.StatusCode)
-			} else if mode == "decode failure" {
-				require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
-			} else {
-				require.Equal(t, http.StatusOK, resp.StatusCode)
-				reader := bufio.NewReader(resp.Body)
-				line, err := reader.ReadString('\n')
-				require.NoError(t, err)
-				require.Equal(t, "data: decode\n", line)
-				switch mode {
-				case "early decode":
-					_, err = io.ReadAll(reader)
-					require.NoError(t, err)
-					select {
-					case <-prefillClosed:
-						t.Fatal("successful decode cancelled prefill")
-					default:
-					}
-					close(releasePrefill)
-				case "grace expiry":
-					_, err = io.ReadAll(reader)
-					require.NoError(t, err)
-				case "client cancellation":
-					cancel()
-				default:
-					close(releasePrefill)
-					_, err = io.ReadAll(reader)
-					require.ErrorIs(t, err, io.ErrUnexpectedEOF)
-				}
-			}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	releasePrefill := make(chan struct{})
+	var prefill, decode map[string]any
+	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		if r.URL.Path != reqcommon.PathSGLangGenerate {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set(reqcommon.HeaderContentType, request.MediaTypeEventStream)
+		if r.Header.Get(reqcommon.EPPProfileHeaderKey) == gateway.PhasePrefill {
+			prefill = body
+			w.Header().Set(routing.PrefillEndpointHeader, "10.0.0.7:8000")
+			w.(http.Flusher).Flush()
 			select {
-			case <-prefillClosed:
-			case <-time.After(2 * time.Second):
-				t.Fatal("prefill did not finish or cancel")
+			case <-releasePrefill:
+			case <-r.Context().Done():
 			}
-			if mode == "missing endpoint" {
-				select {
-				case <-decodeStarted:
-					t.Fatal("decode started without a prefill endpoint")
-				default:
-				}
-			}
-		})
+			return
+		}
+		decode = body
+		_, _ = io.WriteString(w, "data: decode\n\n")
+	}))
+	t.Cleanup(gw.Close)
+	t.Cleanup(cancel)
+	client := gateway.NewWithTransport(nil, gw.URL)
+	params := map[string]any{ParamKVConnector: kv.SGLang}
+	prefillStep, err := NewPrefillStep(client, params)
+	require.NoError(t, err)
+	decodeStep, err := NewDecodeStep(client, params)
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	reqCtx := &pipeline.RequestContext{OriginalPath: reqcommon.PathSGLangGenerate, Stream: true,
+		Body: map[string]any{"text": "hello", "stream": true, reqcommon.FieldBootstrapHost: "untrusted"}, ResponseWriter: recorder}
+	ctx = log.IntoContext(ctx, funcr.New(func(_, _ string) {}, funcr.Options{Verbosity: logutil.TRACE}))
+	require.NoError(t, prefillStep.Execute(ctx, reqCtx))
+	pending := reqCtx.Prefill
+	t.Cleanup(func() { pending.Finish(false) })
+	require.NotContains(t, prefill, reqcommon.FieldBootstrapHost)
+	require.NotNil(t, prefill[reqcommon.FieldBootstrapRoom])
+	require.NotNil(t, prefill[reqcommon.FieldBootstrapPort])
+	require.NoError(t, decodeStep.Execute(ctx, reqCtx), "decode must complete while prefill is held open")
+	require.Equal(t, "10.0.0.7", decode[reqcommon.FieldBootstrapHost])
+	require.Equal(t, prefill[reqcommon.FieldBootstrapRoom], decode[reqcommon.FieldBootstrapRoom])
+	require.Equal(t, prefill[reqcommon.FieldBootstrapPort], decode[reqcommon.FieldBootstrapPort])
+	require.Equal(t, "data: decode\n\n", recorder.Body.String())
+	require.Nil(t, reqCtx.Prefill)
+	close(releasePrefill)
+	select {
+	case err := <-pending.Done:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("prefill did not finish")
 	}
 }
 

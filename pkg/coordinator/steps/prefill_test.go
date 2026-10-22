@@ -25,18 +25,22 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/funcr"
+	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	"github.com/llm-d/llm-d-router/pkg/common/routing"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/config"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/connectors/ec"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/connectors/kv"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/common/request"
 )
 
 func TestPrefillStep_SendsCorrectGenerateRequest(t *testing.T) {
@@ -1218,4 +1222,63 @@ func countLogMsgs(infos []capturedLog, substr string) int {
 		}
 	}
 	return n
+}
+
+func TestPrefillStep_SGLangMissingEndpoint(t *testing.T) {
+	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(reqcommon.HeaderContentType, request.MediaTypeEventStream)
+	}))
+	t.Cleanup(gw.Close)
+	step, err := NewPrefillStep(gateway.NewWithTransport(nil, gw.URL), map[string]any{ParamKVConnector: kv.SGLang})
+	require.NoError(t, err)
+	reqCtx := &pipeline.RequestContext{OriginalPath: reqcommon.PathSGLangGenerate, Stream: true, Body: map[string]any{"stream": true}}
+	require.ErrorContains(t, step.Execute(t.Context(), reqCtx), "selected endpoint response header")
+	require.Nil(t, reqCtx.Prefill)
+}
+
+func TestPrefillStep_SGLangCleanup(t *testing.T) {
+	grace := 50 * time.Millisecond
+	for _, tc := range []struct {
+		name    string
+		finish  func(*pipeline.PendingPrefill, context.CancelFunc)
+		minimum time.Duration
+	}{
+		{name: "client cancellation", finish: func(_ *pipeline.PendingPrefill, cancel context.CancelFunc) { cancel() }},
+		{name: "pipeline failure", finish: func(p *pipeline.PendingPrefill, _ context.CancelFunc) { p.Finish(false) }},
+		{
+			name: "grace expiry",
+			finish: func(p *pipeline.PendingPrefill, cancel context.CancelFunc) {
+				p.Finish(true)
+				cancel()
+			},
+			minimum: grace,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				w.Header().Set(reqcommon.HeaderContentType, request.MediaTypeEventStream)
+				w.Header().Set(routing.PrefillEndpointHeader, "127.0.0.1:8000")
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			}))
+			t.Cleanup(gw.Close)
+			t.Cleanup(cancel)
+			step, err := NewPrefillStep(gateway.NewWithTransport(nil, gw.URL), map[string]any{ParamKVConnector: kv.SGLang, "prefill_grace": grace.String()})
+			require.NoError(t, err)
+			reqCtx := &pipeline.RequestContext{OriginalPath: reqcommon.PathSGLangGenerate, Stream: true, Body: map[string]any{"stream": true}}
+			require.NoError(t, step.Execute(ctx, reqCtx))
+			t.Cleanup(func() { reqCtx.Prefill.Finish(false) })
+			started := time.Now()
+			tc.finish(reqCtx.Prefill, cancel)
+			select {
+			case err := <-reqCtx.Prefill.Done:
+				require.ErrorIs(t, err, context.Canceled)
+				require.GreaterOrEqual(t, time.Since(started), tc.minimum)
+			case <-time.After(time.Second):
+				t.Fatal("prefill did not cancel")
+			}
+		})
+	}
 }
