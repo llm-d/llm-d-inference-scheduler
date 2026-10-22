@@ -43,10 +43,13 @@ type PickerParameters struct {
 	MaxNumOfEndpoints int `json:"maxNumOfEndpoints"`
 }
 
+// maxTieCounters bounds the per-pool round-robin state; endpoint churn keeps creating new pools.
+const maxTieCounters = 1024
+
 type lockedRand struct {
-	mu      sync.Mutex
-	rand    *rand.Rand
-	counter int // round-robin counter for deterministic tie-breaking
+	mu       sync.Mutex
+	rand     *rand.Rand
+	counters map[uint64]int // round-robin position per candidate pool, for tie-breaking
 }
 
 func newLockedRand() *lockedRand {
@@ -71,15 +74,44 @@ func (r *lockedRand) Shuffle(n int, swap func(i, j int)) {
 	r.rand.Shuffle(n, swap)
 }
 
-// NextCounter returns a monotonically increasing counter for deterministic
-// round-robin tie-breaking across requests.
-func (r *lockedRand) NextCounter() int {
+// NextCounter returns the next round-robin position for the candidate pool identified by
+// poolKey (see PoolKey). Each pool advances on its own, so the prefill and decode profiles of a
+// P/D config, which share one picker, still visit every endpoint of their pool in turn. Profiles
+// that see the same candidates (for example all pods labeled prefill-decode) share a position.
+func (r *lockedRand) NextCounter(poolKey uint64) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	c := r.counter
-	r.counter = (r.counter + 1) % math.MaxInt
+	if r.counters == nil || len(r.counters) >= maxTieCounters {
+		r.counters = make(map[uint64]int)
+	}
+	c := r.counters[poolKey]
+	r.counters[poolKey] = (c + 1) % math.MaxInt
 	return c
+}
+
+// PoolKey identifies a set of candidate endpoints independently of their order: it sums the
+// FNV-1a hash of each endpoint's namespace/name.
+func PoolKey(scoredEndpoints []*fwksched.ScoredEndpoint) uint64 {
+	var key uint64
+	for _, ep := range scoredEndpoints {
+		id := ep.GetMetadata().GetNamespacedName()
+		key += fnv64a(fnv64a(fnv64a(fnvOffset64, id.Namespace), "/"), id.Name)
+	}
+	return key
+}
+
+const (
+	fnvOffset64 = 14695981039346656037
+	fnvPrime64  = 1099511628211
+)
+
+func fnv64a(h uint64, s string) uint64 {
+	for i := range len(s) {
+		h ^= uint64(s[i])
+		h *= fnvPrime64
+	}
+	return h
 }
 
 // PickerRand is a thread-safe random number generator shared by all pickers to avoid seeding
