@@ -284,6 +284,9 @@ request. Any client-provided value under that name is discarded.
 A client-provided `x-llm-d-pin-host-port` is also discarded, on the pipeline and on
 the passthrough, because EPP routes on it
 (see [endpoint-pin-screener](../pkg/epp/framework/plugins/requestcontrol/screener/endpointpin/README.md)).
+A client-provided `Prefer` header is discarded as well: `Prefer: if-available` is the
+`conditional-decode` step's signal to EPP, and EPP answers a request that carries it
+with 412 on any other leg.
 The pipeline can allowlist response headers with `forward_response_headers`;
 values returned by any response-producing step are stored on the request context
 for later requests. A fan-out step selects the most frequent value for each
@@ -636,7 +639,7 @@ edit: registration is the only wiring step.
   step can read them without the operator repeating them per step. The constants are
   `steps.ParamKVConnector` and `steps.ParamECConnector`.
 - Shared parsing helpers live in [pkg/coordinator/steps/utils.go](../pkg/coordinator/steps/utils.go)
-  (`parseUseOpenAIFormat`, `resolveFormat`, `buildMMFeatures`, `copyBody`,
+  (`parseUseOpenAIFormat`, `resolveFormat`, `buildPrefillMMFeatures`, `copyBody`,
   `coerceParamsMap`). Reuse them rather than re-implementing.
 
 ### Dependency injection
