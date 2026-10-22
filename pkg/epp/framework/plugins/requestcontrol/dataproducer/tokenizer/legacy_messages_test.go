@@ -1135,18 +1135,29 @@ func TestLegacyMessagesInvalidToolChoiceIsChanged(t *testing.T) {
 }
 
 func TestLegacyMessagesPayloadWithTelemetryDisabled(t *testing.T) {
-	raw := []byte(`{"messages":[{"role":"user","content":"hi"}],"tools":[],"tool_choice":{"type":"any","disable_parallel_tool_use":true}}`)
-	parsed, err := anthropic.NewAnthropicParser().ParseRequest(t.Context(), raw, map[string]string{":path": reqcommon.PathMessages})
-	require.NoError(t, err)
-	enabled := legacyMessagesPayload(parsed.Body.Messages)
-	require.NotNil(t, prepareLegacyMessagesToolFields(parsed.Body, enabled, true))
-	disabled := legacyMessagesPayload(parsed.Body.Messages)
-	require.Nil(t, prepareLegacyMessagesToolFields(parsed.Body, disabled, false))
-	enabledJSON, err := enabled.Marshal()
-	require.NoError(t, err)
-	disabledJSON, err := disabled.Marshal()
-	require.NoError(t, err)
-	require.JSONEq(t, string(enabledJSON), string(disabledJSON))
+	for _, tc := range []struct {
+		name  string
+		tools string
+	}{
+		{"null tools", `null`},
+		{"empty tools", `[]`},
+		{"nonempty tools", `[{"name":"private_tool","input_schema":{"type":"object"}}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(`{"messages":[{"role":"user","content":"hi"}],"tools":` + tc.tools + `,"tool_choice":{"type":"any","disable_parallel_tool_use":true}}`)
+			parsed, err := anthropic.NewAnthropicParser().ParseRequest(t.Context(), raw, map[string]string{":path": reqcommon.PathMessages})
+			require.NoError(t, err)
+			enabled := legacyMessagesPayload(parsed.Body.Messages)
+			require.NotNil(t, prepareLegacyMessagesToolFields(parsed.Body, enabled, true))
+			disabled := legacyMessagesPayload(parsed.Body.Messages)
+			require.Nil(t, prepareLegacyMessagesToolFields(parsed.Body, disabled, false))
+			enabledJSON, err := enabled.Marshal()
+			require.NoError(t, err)
+			disabledJSON, err := disabled.Marshal()
+			require.NoError(t, err)
+			require.JSONEq(t, string(enabledJSON), string(disabledJSON))
+		})
+	}
 }
 
 func TestLegacyProduceMessages(t *testing.T) {

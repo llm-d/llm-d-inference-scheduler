@@ -169,7 +169,7 @@ func prepareLegacyMessagesToolFields(body *fwkrh.InferenceRequestBody, payload f
 	if telemetryEnabled {
 		expected = fwkrh.PayloadMap{}
 	}
-	if fields.Tools != nil {
+	if fields.Tools != nil && (telemetryEnabled || len(body.Messages.Tools) == 0) {
 		var tools []fwkrh.AnthropicTool
 		if json.Unmarshal(fields.Tools, &tools) != nil {
 			return nil
