@@ -18,6 +18,7 @@ package datalayer
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
@@ -118,12 +119,18 @@ func BuildRegistry(plugins []plugin.Plugin) (*Registry, error) {
 						dk.String(), p.TypedName().String(), declared, existing.typ,
 					)
 				}
+				if existing.allAttrs != allAttrs || !maps.Equal(existing.attrs, attrs) {
+					return nil, fmt.Errorf(
+						"data key %q is produced by %q with attributes (all=%t, %v), but already registered by %q with attributes (all=%t, %v)",
+						dk.String(), p.TypedName().String(), allAttrs, attrs, existing.producerName, existing.allAttrs, existing.attrs,
+					)
+				}
 				continue
 			}
 			r.entries[dk.String()] = regEntry{
 				typ:          declared,
 				producerName: p.TypedName().String(),
-				attrs:        attrs,
+				attrs:        maps.Clone(attrs),
 				allAttrs:     allAttrs,
 			}
 		}
@@ -187,7 +194,7 @@ func (r *Registry) checkKey(consumerName string, dk plugin.DataKey, val any) err
 				consumerName, dk.String(), entry.producerName,
 			)
 		}
-		if err := matches(entry.attrs); err != nil {
+		if err := matches(maps.Clone(entry.attrs)); err != nil {
 			return fmt.Errorf(
 				"plugin %q rejected producer %q for data key %q: %w",
 				consumerName, entry.producerName, dk.String(), err,

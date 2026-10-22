@@ -105,6 +105,27 @@ func TestBuildRegistry_DuplicateKeyDifferentTypeFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "type")
 }
 
+func TestBuildRegistry_DuplicateKeyDifferentAttributesFails(t *testing.T) {
+	dk := plugin.NewDataKey("alpha", "reg")
+	p1 := &regProducer{
+		name: "p1",
+		produces: map[plugin.DataKey]any{
+			dk: plugin.ProducedData{Type: regValueA{}, Attributes: map[string]string{"backend": "estimate"}},
+		},
+	}
+	p2 := &regProducer{
+		name: "p2",
+		produces: map[plugin.DataKey]any{
+			dk: plugin.ProducedData{Type: regValueA{}, Attributes: map[string]string{"backend": "vllm"}},
+		},
+	}
+
+	_, err := BuildRegistry([]plugin.Plugin{p1, p2})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "already registered by")
+	assert.Contains(t, err.Error(), "attributes")
+}
+
 func TestBuildRegistry_NilPlaceholderTreatedAsUntyped(t *testing.T) {
 	dk := plugin.NewDataKey("alpha", "reg")
 	p := &regProducer{name: "p", produces: map[plugin.DataKey]any{dk: nil}}
