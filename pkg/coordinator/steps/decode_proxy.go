@@ -33,7 +33,6 @@ import (
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
-	"github.com/llm-d/llm-d-router/pkg/common/routing"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/common/httplog"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
@@ -75,9 +74,6 @@ func newDecodeProxyRequest(ctx context.Context, logger logr.Logger, step string,
 	proxyReq.Header.Set(reqcommon.EPPProfileHeaderKey, gateway.PhaseDecode)
 	if reqCtx.PeerTopology != "" {
 		proxyReq.Header.Set(reqcommon.PeerTopologyHeaderKey, reqCtx.PeerTopology)
-	}
-	if reqCtx.Prefill != nil {
-		proxyReq.Header.Set(routing.PrefillEndpointHeader, reqCtx.Prefill.Endpoint)
 	}
 	for k, v := range extraHeaders {
 		proxyReq.Header.Set(k, v)
