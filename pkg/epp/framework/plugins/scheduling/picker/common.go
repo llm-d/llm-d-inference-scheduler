@@ -43,13 +43,13 @@ type PickerParameters struct {
 	MaxNumOfEndpoints int `json:"maxNumOfEndpoints"`
 }
 
-// maxTieCounters bounds the per-pool round-robin state; endpoint churn keeps creating new pools.
+// maxTieCounters caps the per-pool state as pods come and go.
 const maxTieCounters = 1024
 
 type lockedRand struct {
 	mu       sync.Mutex
 	rand     *rand.Rand
-	counters map[uint64]int // round-robin position per candidate pool, for tie-breaking
+	counters map[uint64]int // round-robin position per candidate pool
 }
 
 func newLockedRand() *lockedRand {
@@ -74,10 +74,8 @@ func (r *lockedRand) Shuffle(n int, swap func(i, j int)) {
 	r.rand.Shuffle(n, swap)
 }
 
-// NextCounter returns the next round-robin position for the candidate pool identified by
-// poolKey (see PoolKey). Each pool advances on its own, so the prefill and decode profiles of a
-// P/D config, which share one picker, still visit every endpoint of their pool in turn. Profiles
-// that see the same candidates (for example all pods labeled prefill-decode) share a position.
+// NextCounter returns the next round-robin position for the candidate pool poolKey.
+// Prefill and decode share one picker but rotate independently unless they see the same pods.
 func (r *lockedRand) NextCounter(poolKey uint64) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -90,8 +88,7 @@ func (r *lockedRand) NextCounter(poolKey uint64) int {
 	return c
 }
 
-// PoolKey identifies a set of candidate endpoints independently of their order: it sums the
-// FNV-1a hash of each endpoint's namespace/name.
+// PoolKey hashes the endpoint names of a candidate set, independent of their order.
 func PoolKey(scoredEndpoints []*fwksched.ScoredEndpoint) uint64 {
 	var key uint64
 	for _, ep := range scoredEndpoints {

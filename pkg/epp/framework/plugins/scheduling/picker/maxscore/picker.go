@@ -94,9 +94,7 @@ func (p *MaxScorePicker) Pick(ctx context.Context, scoredEndpoints []*fwksched.S
 			"num-of-candidates", len(scoredEndpoints), "scored-endpoints", scoredEndpoints)
 	}
 
-	// Highest score first; equal scores in name order, so the rotation below walks the same list
-	// on every call instead of whatever order the scheduler's score map produced.
-	slices.SortFunc(scoredEndpoints, func(i, j *fwksched.ScoredEndpoint) int {
+	slices.SortFunc(scoredEndpoints, func(i, j *fwksched.ScoredEndpoint) int { // highest score first, ties by name
 		if i.Score > j.Score {
 			return -1
 		}

@@ -104,9 +104,7 @@ func TestEqualScoreDistribution_WithLowerScoredCandidates(t *testing.T) {
 }
 
 func TestEqualScoreDistribution_PoolsSharingPicker(t *testing.T) {
-	// In P/D the decode and prefill profiles call the same picker once each per request.
-	// Each pool must still alternate between its tied endpoints, whatever order the
-	// candidates arrive in.
+	// Decode and prefill share one picker in P/D; each pool must still alternate.
 	newPool := func(prefix string) []fwksched.Endpoint {
 		return []fwksched.Endpoint{
 			fwksched.NewEndpoint(&fwkdl.EndpointMetadata{ID: k8stypes.NamespacedName{Name: prefix + "-0"}}, nil, nil),
