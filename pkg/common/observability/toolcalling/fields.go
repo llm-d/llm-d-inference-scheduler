@@ -208,7 +208,7 @@ func captureRequestJSON(surface reqcommon.APIType, body []byte, validated bool) 
 					return RequestSnapshot{}, fmt.Errorf("decode %s field: %w", field, err)
 				}
 				snapshot.summary.ToolChoicePresent = true
-				snapshot.summary.ToolChoiceKind = normalizeToolChoiceValue(surface, value)
+				snapshot.summary.ToolChoiceKind = NormalizeToolChoice(surface, value)
 			}
 		}
 	}
@@ -518,7 +518,8 @@ func fieldsForSurface(surface reqcommon.APIType) ([]Field, error) {
 	}
 }
 
-func normalizeToolChoiceValue(surface reqcommon.APIType, value any) ToolChoiceKind {
+// NormalizeToolChoice classifies a decoded tool_choice value for the given API surface.
+func NormalizeToolChoice(surface reqcommon.APIType, value any) ToolChoiceKind {
 	switch choice := value.(type) {
 	case string:
 		switch choice {
