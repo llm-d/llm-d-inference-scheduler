@@ -70,7 +70,7 @@ func (s *ConditionalDecodeStep) Execute(ctx context.Context, reqCtx *pipeline.Re
 	}
 
 	var cacheMiss bool
-	out := serveDecode(logger, s.gwClient.Transport(), reqCtx.ResponseWriter, proxyReq, coordmetrics.UpstreamConditionalDecode, func(resp *http.Response) error {
+	out := serveDecode(ctx, logger, s.gwClient.Transport(), reqCtx.ResponseWriter, proxyReq, coordmetrics.UpstreamConditionalDecode, func(resp *http.Response) error {
 		switch {
 		case resp.StatusCode == http.StatusPreconditionFailed:
 			cacheMiss = true

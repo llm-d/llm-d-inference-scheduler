@@ -94,17 +94,7 @@ func (s *DecodeStep) Execute(ctx context.Context, reqCtx *pipeline.RequestContex
 	}
 
 	writer, finalize := s.responseWriter(reqCtx)
-	out := serveDecode(logger, s.gwClient.Transport(), writer, proxyReq, coordmetrics.UpstreamDecode, nil)
-	if reqCtx.Prefill != nil && context.Cause(decodeCtx) != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		// Prefill failure cancels the proxy while the client is still connected.
-		if out.Status != 0 {
-			panic(http.ErrAbortHandler)
-		}
-		return context.Cause(decodeCtx)
-	}
+	out := serveDecode(ctx, logger, s.gwClient.Transport(), writer, proxyReq, coordmetrics.UpstreamDecode, nil)
 	if err := finalize(); err != nil {
 		// The buffered tail could not be forwarded, so the client holds a
 		// truncated response. Nothing can be written to say so: the status and

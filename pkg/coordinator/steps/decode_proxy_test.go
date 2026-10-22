@@ -305,10 +305,9 @@ func TestServeDecode_BodyCopyFailure(t *testing.T) {
 		status     int
 		clientGone bool
 		wantPanic  bool
-		wantStatus int // status on the UpstreamStreamedError; 0 means no error
 	}{
 		{name: "served stream, client gone", status: http.StatusOK, clientGone: true},
-		{name: "error stream, client gone", status: http.StatusInternalServerError, clientGone: true, wantStatus: http.StatusInternalServerError},
+		{name: "error stream, client gone", status: http.StatusInternalServerError, clientGone: true},
 		{name: "write failed, client present", status: http.StatusOK, wantPanic: true},
 	}
 	for _, tc := range cases {
@@ -325,21 +324,14 @@ func TestServeDecode_BodyCopyFailure(t *testing.T) {
 			w := &brokenPipeWriter{header: http.Header{}}
 
 			var out *decodeOutcome
-			run := func() { out = serveDecode(logr.Discard(), transport, w, req, coordmetrics.UpstreamDecode, nil) }
+			run := func() { out = serveDecode(ctx, logr.Discard(), transport, w, req, coordmetrics.UpstreamDecode, nil) }
 			if tc.wantPanic {
 				require.PanicsWithValue(t, http.ErrAbortHandler, run)
 				return
 			}
 			run()
 			require.Equal(t, tc.status, out.Status)
-			err := out.streamedError(DecodeStepName)
-			if tc.wantStatus == 0 {
-				require.NoError(t, err)
-				return
-			}
-			var streamed *pipeline.UpstreamStreamedError
-			require.ErrorAs(t, err, &streamed)
-			require.Equal(t, tc.wantStatus, streamed.StatusCode)
+			require.ErrorIs(t, out.streamedError(DecodeStepName), context.Canceled)
 		})
 	}
 }

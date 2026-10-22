@@ -115,6 +115,7 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 
 	prefillCtx := ctx
 	var done chan error
+	var pending *pipeline.PendingPrefill
 	handedOff := false
 	if format == reqcommon.APITypeSGLangGenerate {
 		if reqCtx.Prefill != nil {
@@ -124,7 +125,7 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 		prefillCtx, cancel = context.WithCancel(context.WithoutCancel(ctx))
 		stop := context.AfterFunc(ctx, cancel)
 		done = make(chan error, 1)
-		reqCtx.Prefill = &pipeline.PendingPrefill{Done: done, Finish: func(success bool) {
+		pending = &pipeline.PendingPrefill{Done: done, Finish: func(success bool) {
 			stop()
 			if !success {
 				cancel()
@@ -142,8 +143,7 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 		}}
 		defer func() {
 			if !handedOff {
-				reqCtx.Prefill.Finish(false)
-				reqCtx.Prefill = nil
+				pending.Finish(false)
 			}
 		}()
 	}
@@ -182,6 +182,7 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 			}
 			done <- err
 		}()
+		reqCtx.Prefill = pending
 		handedOff = true
 		return nil
 	}
