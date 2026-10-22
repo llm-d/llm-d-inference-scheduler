@@ -109,6 +109,17 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	// A tool call cannot be reassembled across chunk boundaries: vLLM parses it
+	// from a single request's output, and a call split by the chunk budget comes
+	// back as plain content. Bypass chunking when tools may be called. tools and
+	// tool_choice stay raw (not in inspectedRequestFields), so inspect their bytes
+	// without re-encoding them.
+	if requestMayCallTools(body) {
+		s.logger.V(logging.DEBUG).Info("chunked decode: tools requested, using regular decode")
+		s.decoderProxy.ServeHTTP(w, r)
+		return
+	}
+
 	// If the token budget fits within a single chunk, skip chunking entirely.
 	if originalMaxTokens > 0 && originalMaxTokens <= s.config.DecodeChunkSize {
 		s.logger.V(logging.DEBUG).Info("chunked decode: token budget <= chunk size, using regular decode",
@@ -505,4 +516,26 @@ func toInt(v any) (int, bool) {
 		return int(i), err == nil
 	}
 	return 0, false
+}
+
+// requestMayCallTools reports whether the request declares a non-empty tools list
+// and does not disable tool calls via tool_choice: "none". tools and tool_choice
+// are not in inspectedRequestFields, so they arrive as json.RawMessage; this reads
+// their bytes without decoding and re-encoding them.
+func requestMayCallTools(body map[string]any) bool {
+	raw, ok := body[reqcommon.FieldTools].(json.RawMessage)
+	if !ok {
+		return false
+	}
+	var tools []json.RawMessage
+	if err := json.Unmarshal(raw, &tools); err != nil || len(tools) == 0 {
+		return false
+	}
+	if choice, ok := body[reqcommon.FieldToolChoice].(json.RawMessage); ok {
+		var value string
+		if json.Unmarshal(choice, &value) == nil && value == reqcommon.ToolChoiceNone {
+			return false
+		}
+	}
+	return true
 }
