@@ -811,6 +811,74 @@ func TestHandleInference_StepWrittenErrorClassifiedAndNotOverwritten(t *testing.
 	)
 }
 
+// A step returns after the client's request context ended; only the context
+// error itself goes uncounted.
+func TestHandleInference_AbortedRequestAccounting(t *testing.T) {
+	cases := []struct {
+		name       string
+		returns    error  // error the step returns; nil returns the context error
+		wantCode   string // request_error_total{wantCode}; "" counts nothing
+		wantStatus int    // status written; 0 writes nothing
+	}{
+		{name: "step returns the context error"},
+		{
+			name:     "decode streamed a 500 before the client left",
+			returns:  &pipeline.UpstreamStreamedError{Step: "decode", StatusCode: http.StatusInternalServerError},
+			wantCode: coordmetrics.ErrorCodeUpstream5xx,
+		},
+		{
+			name:       "upstream answered 503 before the client left",
+			returns:    &pipeline.UpstreamError{Step: "decode", StatusCode: http.StatusServiceUnavailable},
+			wantCode:   coordmetrics.ErrorCodeUpstream5xx,
+			wantStatus: http.StatusBadGateway,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := newMetricsRegistry(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			step := stubStep{name: "decode", fn: func(ctx context.Context, _ *pipeline.RequestContext) error {
+				cancel()
+				if tc.returns != nil {
+					return tc.returns
+				}
+				return ctx.Err()
+			}}
+			srv, err := New(config.ServerConfig{}, pipeline.New([]pipeline.Step{step}), gateway.NewWithTransport(nil, stubGatewayURL))
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"m"}`)).WithContext(ctx)
+			rec := httptest.NewRecorder()
+			srv.handleInference(rec, req)
+
+			if tc.wantStatus == 0 {
+				require.Empty(t, rec.Body.String())
+			} else {
+				require.Equal(t, tc.wantStatus, rec.Code)
+			}
+			if tc.wantCode == "" {
+				require.Zero(t, seriesCount(t, reg, "llm_d_coordinator_request_error_total"))
+				require.Zero(t, seriesCount(t, reg, "llm_d_coordinator_step_errors_total"))
+			} else {
+				require.InDelta(t, 1.0,
+					promtestutil.ToFloat64(mustCounter(t, reg, "llm_d_coordinator_request_error_total", map[string]string{"model_name": "m", "error_code": tc.wantCode})),
+					1e-9,
+				)
+				require.Equal(t, 1, seriesCount(t, reg, "llm_d_coordinator_step_errors_total"))
+			}
+			require.InDelta(t, 1.0,
+				promtestutil.ToFloat64(mustCounter(t, reg, "llm_d_coordinator_request_total", map[string]string{"model_name": "m"})),
+				1e-9,
+			)
+			require.InDelta(t, 0.0,
+				promtestutil.ToFloat64(mustRequestRunningGauge(t, reg, map[string]string{"model_name": "m"})),
+				1e-9,
+			)
+		})
+	}
+}
+
 func TestHandleInference_PipelineDoneRecordsNoError(t *testing.T) {
 	reg := newMetricsRegistry(t)
 

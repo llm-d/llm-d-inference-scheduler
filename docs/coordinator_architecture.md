@@ -246,6 +246,8 @@ completions prompt is already a token array). See
      the Gateway) is forwarded with that same `4xx`, since the request was the root cause;
    - any other error, including an upstream `5xx`, returns `502 Bad Gateway`.
 
+   A client disconnect is logged at verbosity `VERBOSE`, not as an error.
+
    Upstream response bodies are logged server-side only and never returned to the client.
    A step returning `ErrPipelineDone` instead stops the pipeline and reports success, used
    by `conditional-decode` when the decode worker serves the request directly. A step that
