@@ -339,13 +339,17 @@ For native SGLang `/generate` requests with `stream: true`, configure the termin
 
 ```yaml
 pipeline:
-  kv_connector: kv-sglang
   steps:
     - type: sglang-pd
       params:
-        bootstrap_port: 8998
         prefill_grace: 30s
 ```
+
+The step uses the shared `SGLANG_BOOTSTRAP_PORT` setting described under
+[KV and EC transfer protocols](#kv-and-ec-transfer-protocols). For SGLang's Rust
+server, set it to the HTTP port (8000 in the Rust deployment example), where the
+frontend serves the bootstrap API. `prefill_grace` is the step's only parameter; pipeline connector
+defaults do not apply.
 
 The step forwards the native request body and creates a shared numeric
 `bootstrap_room`. It sends prefill through the gateway with the `prefill` profile.
@@ -375,8 +379,28 @@ plugins:
   - type: sglang-bootstrap-handler
     parameters:
       profileName: prefill
+  - type: endpoint-notification-source
+  - type: inflight-load-producer
+  - type: concurrency-detector
+    parameters:
+      maxConcurrency: 8
+requestHandler:
+  parsers:
+    - pluginRef: sglanghttp-parser
+dataLayer:
+  injectDefaults: false
+  sources:
+    - pluginRef: endpoint-notification-source
+      extractors:
+        - pluginRef: inflight-load-producer
+flowControl:
+  saturationDetector:
+    pluginRef: concurrency-detector
 ```
 
+This configuration uses the existing in-flight concurrency detector rather than
+engine metrics, so it also serves Rust frontend versions without `/metrics`.
+Set `maxConcurrency` to the deployment's per-endpoint request limit.
 `header-profile-handler` replaces the sidecar's `disagg-profile-handler` in this
 configuration. Both requests route directly from the gateway to SGLang workers.
 `bootstrap_port` must match the prefill worker's bootstrap service and be reachable
@@ -393,7 +417,9 @@ response is involved. See the [ext_proc processing modes](https://www.envoyproxy
 
 The early HTTP 200 acknowledges response start, not scheduler admission or KV
 readiness. SGLang's [native streaming handler](https://github.com/sgl-project/sglang/blob/881bd9f972d251ef54c53883a2bc0fc64ee592ba/python/sglang/srt/entrypoints/http_server.py#L930)
-returns `StreamingResponse` before iterating generation; its OpenAI-compatible handlers await a generation result.
+returns `StreamingResponse` before iterating generation. The
+[Rust native handler](https://github.com/sgl-project/sglang/blob/94602c9c2b7cbdb8efd5c52802dac6a1c180089e/rust/sglang-server/src/api_server/native_api.rs#L271)
+returns an SSE response after submission, before waiting for generated frames.
 This step supports a single native request with `sampling_params.n` absent or 1.
 It rejects non-streaming and OpenAI API requests. It does not perform rendering or
 encode-stage orchestration. The pipeline's `use_openai_format` option is unused by
@@ -494,10 +520,10 @@ KV connector protocols ([pkg/coordinator/connectors/kv/](../pkg/coordinator/conn
 | `kv-sglang` | `sglang` | SGLang bootstrap: `bootstrap_host`, `bootstrap_port`, `bootstrap_room`. |
 | `kv-shared-storage` | `shared-storage` | Shared filesystem / object store: prefill writes KV, decode reads it; no transfer descriptor on the wire. |
 
-The `kv-sglang` `bootstrap_port` advertised to prefill pods defaults to 8998 and can be
-overridden process-wide with the `SGLANG_BOOTSTRAP_PORT` environment variable. The value
-is read once on the first prefill request that uses the connector; a non-integer value is
-rejected in favor of the default and logged at error level.
+The `kv-sglang` connector and `sglang-pd` step share the `SGLANG_BOOTSTRAP_PORT`
+environment variable, which defaults to 8998. The value is read once on the first
+prefill request using either path. Invalid values select the default and are logged
+at error level.
 
 EC connector protocols ([pkg/coordinator/connectors/ec/](../pkg/coordinator/connectors/ec/)) ship encoder
 embeddings from encode pods to the prefill pod:
@@ -694,10 +720,10 @@ edit: registration is the only wiring step.
 - Config values arrive as `map[string]any` decoded by viper. Integers decode as `int`,
   booleans as `bool`, durations as `string` (parse with `time.ParseDuration`), strings
   as `string`. Type-assert defensively and supply a default when the key is absent.
-- Connector names (`kv_connector`, `ec_connector`) and `use_openai_format` are injected
-  into every step's `params` by the entrypoint before the factory runs (see below), so a
-  step can read them without the operator repeating them per step. The constants are
-  `steps.ParamKVConnector` and `steps.ParamECConnector`.
+- Connector defaults are injected into step `params` except for `sglang-pd` (see
+  [Connector selection](#connector-selection)). The constants are
+  `steps.ParamKVConnector` and `steps.ParamECConnector`. `use_openai_format` is
+  injected only into `encode` and `prefill`.
 - Shared parsing helpers live in [pkg/coordinator/steps/utils.go](../pkg/coordinator/steps/utils.go)
   (`parseUseOpenAIFormat`, `resolveFormat`, `buildMMFeatures`, `copyBody`,
   `coerceParamsMap`). Reuse them rather than re-implementing.
@@ -790,8 +816,9 @@ documented example is `COORDINATOR_PIPELINE_USE_OPENAI_FORMAT`. The CLI flag `-v
 ### Connector selection
 
 `pipeline.kv_connector` and `pipeline.ec_connector` are deployment-wide defaults. The
-entrypoint injects them into every step's `params` so each step constructs the matching
-connector. They must agree with the connector configured on the vLLM pods.
+builder injects them into step `params` except for `sglang-pd`, which implements the
+native SGLang protocol directly. Connector-using steps must agree with the connector
+configured on the vLLM pods.
 
 | Key | Values | Default |
 | :---- | :---- | :---- |

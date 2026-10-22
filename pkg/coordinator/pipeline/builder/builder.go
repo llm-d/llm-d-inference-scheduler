@@ -85,7 +85,10 @@ func Build(cfg *config.Config, gwClient *gateway.Client) (*pipeline.Pipeline, er
 
 	pipelineSteps := make([]pipeline.Step, 0, len(cfg.Pipeline.Steps))
 	for _, stepCfg := range cfg.Pipeline.Steps {
-		params := mergePipelineDefaults(stepCfg.Params, cfg.Pipeline)
+		params := stepCfg.Params
+		if stepCfg.Type != steps.SGLangPDStepName {
+			params = mergePipelineDefaults(params, cfg.Pipeline)
+		}
 		if usesOpenAIFormatParam(stepCfg.Type) {
 			if _, ok := params["use_openai_format"]; !ok {
 				params["use_openai_format"] = cfg.Pipeline.UseOpenAIFormat

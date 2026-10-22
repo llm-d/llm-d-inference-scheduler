@@ -19,6 +19,7 @@ package builder
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/config"
@@ -136,5 +137,42 @@ func TestBuildRejectsInvalidForwardResponseHeaders(t *testing.T) {
 	}}
 	if _, err := Build(cfg, nil); err == nil {
 		t.Fatal("Build() expected an error for a non-forwardable response header")
+	}
+}
+
+func TestBuildSGLangPDConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		params    string
+		wantError string
+	}{
+		{name: "pipeline connector defaults do not apply"},
+		{name: "grace period", params: "        prefill_grace: 5s\n"},
+		{name: "explicit kv connector rejected", params: "        kv_connector: kv-sglang\n", wantError: "kv_connector"},
+		{name: "explicit ec connector rejected", params: "        ec_connector: ec-nixl\n", wantError: "ec_connector"},
+		{name: "separate bootstrap port rejected", params: "        bootstrap_port: 8000\n", wantError: "bootstrap_port"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := "pipeline:\n  kv_connector: kv-nixl\n  ec_connector: ec-nixl\n  steps:\n    - type: sglang-pd\n"
+			if tc.params != "" {
+				body += "      params:\n" + tc.params
+			}
+			path := filepath.Join(t.TempDir(), "coordinator.yaml")
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := config.Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = Build(cfg, gateway.New(config.GatewayConfig{}))
+			if tc.wantError == "" {
+				if err != nil {
+					t.Fatalf("Build() unexpected error: %v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("Build() error = %v, want error containing %q", err, tc.wantError)
+			}
+		})
 	}
 }

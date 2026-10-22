@@ -60,9 +60,9 @@ func parseSGLangBootstrapPort(raw string) (port int, rejected bool) {
 	return p, false
 }
 
-// resolveSGLangBootstrapPort reads SGLANG_BOOTSTRAP_PORT once on first use,
+// ResolveSGLangBootstrapPort reads SGLANG_BOOTSTRAP_PORT once on first use,
 // where a configured context logger is available to report a rejected value.
-func resolveSGLangBootstrapPort(ctx context.Context) int {
+func ResolveSGLangBootstrapPort(ctx context.Context) int {
 	sglangBootstrapPortOnce.Do(func() {
 		raw := os.Getenv(envSGLangBootstrapPort)
 		port, rejected := parseSGLangBootstrapPort(raw)
@@ -89,7 +89,7 @@ func (sglangKV) PreparePrefillKVParams(ctx context.Context, _ *pipeline.RequestC
 	params := map[string]any{
 		reqcommon.FieldDoRemoteDecode:  true,
 		reqcommon.FieldDoRemotePrefill: false,
-		reqcommon.FieldBootstrapPort:   resolveSGLangBootstrapPort(ctx),
+		reqcommon.FieldBootstrapPort:   ResolveSGLangBootstrapPort(ctx),
 		reqcommon.FieldBootstrapRoom:   uuid.NewString(),
 	}
 	log.FromContext(ctx).WithName(loggerName).V(logutil.TRACE).Info("preparing prefill kv params", "params", params)

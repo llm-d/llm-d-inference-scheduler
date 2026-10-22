@@ -48,34 +48,18 @@ func init() { pipeline.Register(SGLangPDStepName, NewSGLangPDStep) }
 // SGLangPDStep starts decode when the streaming prefill response headers arrive.
 // The prefill EPP must run sglang-bootstrap-handler.
 type SGLangPDStep struct {
-	gwClient      *gateway.Client
-	bootstrapPort int
-	prefillGrace  time.Duration
+	gwClient     *gateway.Client
+	prefillGrace time.Duration
 }
 
 func NewSGLangPDStep(client *gateway.Client, params map[string]any) (pipeline.Step, error) {
 	if client == nil {
 		return nil, errors.New("sglang-pd: gateway client is required")
 	}
-	if err := rejectUseOpenAIFormatOverride(SGLangPDStepName, params); err != nil {
-		return nil, err
-	}
-	connector, err := paramString(params, ParamKVConnector)
-	if err != nil {
-		return nil, err
-	}
-	if connector != "" && connector != kv.SGLang {
-		return nil, errors.New("sglang-pd requires kv-sglang")
-	}
-	port, present, err := paramInt(params, "bootstrap_port")
-	if err != nil {
-		return nil, err
-	}
-	if !present {
-		port = kv.DefaultSGLangBootstrapPort
-	}
-	if port < 1 || port > 65535 {
-		return nil, errors.New("sglang-pd: bootstrap_port must be between 1 and 65535")
+	for key := range params {
+		if key != "prefill_grace" {
+			return nil, fmt.Errorf("sglang-pd: %s is not a valid parameter for this step", key)
+		}
 	}
 	grace, present, err := paramDuration(params, "prefill_grace")
 	if err != nil {
@@ -87,7 +71,7 @@ func NewSGLangPDStep(client *gateway.Client, params map[string]any) (pipeline.St
 	if grace <= 0 {
 		return nil, errors.New("sglang-pd: prefill_grace must be positive")
 	}
-	return &SGLangPDStep{gwClient: client, bootstrapPort: port, prefillGrace: grace}, nil
+	return &SGLangPDStep{gwClient: client, prefillGrace: grace}, nil
 }
 
 func (s *SGLangPDStep) Name() string { return SGLangPDStepName }
@@ -115,7 +99,7 @@ func (s *SGLangPDStep) Execute(ctx context.Context, rc *pipeline.RequestContext)
 	body := maps.Clone(rc.Body)
 	delete(body, reqcommon.FieldBootstrapHost)
 	body[reqcommon.FieldBootstrapRoom] = room.Int64()
-	body[reqcommon.FieldBootstrapPort] = s.bootstrapPort
+	body[reqcommon.FieldBootstrapPort] = kv.ResolveSGLangBootstrapPort(ctx)
 	body[reqcommon.FieldStream] = true
 	prefillBody, err := json.Marshal(body)
 	if err != nil {

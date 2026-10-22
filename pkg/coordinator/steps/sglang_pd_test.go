@@ -31,6 +31,7 @@ import (
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/common/routing"
+	"github.com/llm-d/llm-d-router/pkg/coordinator/connectors/kv"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
 	"github.com/stretchr/testify/require"
@@ -41,6 +42,9 @@ func TestSGLangPDStartsDecodeBeforePrefillBody(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	ctx = log.IntoContext(ctx, funcr.New(func(_, _ string) {}, funcr.Options{Verbosity: logutil.TRACE}))
+	connector, err := kv.Build(kv.SGLang)
+	require.NoError(t, err)
+	wantPort := connector.PreparePrefillKVParams(ctx, &pipeline.RequestContext{})[reqcommon.FieldBootstrapPort].(int)
 	releasePrefill := make(chan struct{})
 	prefillClosed := make(chan struct{})
 	var prefill map[string]any
@@ -49,6 +53,9 @@ func TestSGLangPDStartsDecodeBeforePrefillBody(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
 			return
+		}
+		if body[reqcommon.FieldBootstrapPort] != float64(wantPort) {
+			t.Errorf("bootstrap port = %v, want shared SGLang port %d", body[reqcommon.FieldBootstrapPort], wantPort)
 		}
 		if r.Header.Get(reqcommon.EPPProfileHeaderKey) == gateway.PhasePrefill {
 			prefill = body
