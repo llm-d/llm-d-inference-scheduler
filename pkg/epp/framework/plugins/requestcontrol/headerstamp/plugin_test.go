@@ -30,6 +30,7 @@ import (
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	attrstring "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/string"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/extractor/attribute"
 )
 
 func TestFactory_Validation(t *testing.T) {
@@ -87,7 +88,7 @@ func newTestHandler(rules ...stampRule) *Handler {
 }
 
 func pathPrefixKey() fwkplugin.DataKey {
-	return fwkplugin.NewDataKey("pathPrefix", fwkdl.DiscoveryAttributesProducer)
+	return fwkplugin.NewDataKey("pathPrefix", attribute.AttributeProducerType)
 }
 
 func TestPreRequest_PrependPath(t *testing.T) {
@@ -101,7 +102,7 @@ func TestPreRequest_PrependPath(t *testing.T) {
 }
 
 func TestPreRequest_SetOverwritesClientValue(t *testing.T) {
-	modelKey := fwkplugin.NewDataKey("model", fwkdl.DiscoveryAttributesProducer)
+	modelKey := fwkplugin.NewDataKey("model", attribute.AttributeProducerType)
 	ep := makeEndpoint(t, map[fwkplugin.DataKey]attrstring.Value{modelKey: "nvfp4"})
 	h := newTestHandler(stampRule{headerName: "x-llm-d-model", mode: modeSet, dataKey: modelKey})
 	request := &fwksched.InferenceRequest{Headers: map[string]string{"x-llm-d-model": "client-spoofed"}}
@@ -130,7 +131,7 @@ func TestPreRequest_NoSelectedEndpoint(t *testing.T) {
 }
 
 func TestPreRequest_MultipleStamps(t *testing.T) {
-	modelKey := fwkplugin.NewDataKey("model", fwkdl.DiscoveryAttributesProducer)
+	modelKey := fwkplugin.NewDataKey("model", attribute.AttributeProducerType)
 	ep := makeEndpoint(t, map[fwkplugin.DataKey]attrstring.Value{
 		pathPrefixKey(): "/laneB",
 		modelKey:        "fp8",
@@ -147,11 +148,47 @@ func TestPreRequest_MultipleStamps(t *testing.T) {
 }
 
 func TestPreRequest_NilHeaders(t *testing.T) {
-	modelKey := fwkplugin.NewDataKey("model", fwkdl.DiscoveryAttributesProducer)
+	modelKey := fwkplugin.NewDataKey("model", attribute.AttributeProducerType)
 	ep := makeEndpoint(t, map[fwkplugin.DataKey]attrstring.Value{modelKey: "fp8"})
 	h := newTestHandler(stampRule{headerName: "x-llm-d-model", mode: modeSet, dataKey: modelKey})
 	request := &fwksched.InferenceRequest{}
 
 	require.NoError(t, h.PreRequest(context.Background(), request, schedulingResult(ep)))
 	assert.Equal(t, "fp8", request.Headers["x-llm-d-model"])
+}
+
+func TestFactory_RejectsEPPOwnedHeaderNames(t *testing.T) {
+	cases := []struct {
+		name       string
+		headerName string
+	}{
+		{name: "system-owned header stripped on the way out", headerName: "x-llm-d-inference-objective"},
+		{name: "internal routing header", headerName: "x-llm-d-prefiller-host-port"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			params := `{"stamps": [{"attributeKey": "a", "headerName": "` + tc.headerName + `"}]}`
+			_, err := Factory("test", json.NewDecoder(strings.NewReader(params)), nil)
+			require.Error(t, err, "headerName %q must be rejected at factory time", tc.headerName)
+		})
+	}
+}
+
+func TestFactory_NonDefaultProducerName(t *testing.T) {
+	params := `{"attributeProducerName": "label-producer", "stamps": [{"attributeKey": "tenant", "headerName": "x-tenant"}]}`
+	p, err := Factory("test", json.NewDecoder(strings.NewReader(params)), nil)
+	require.NoError(t, err)
+	consumes := p.(fwkplugin.ConsumerPlugin).Consumes()
+	_, ok := consumes.Optional[fwkplugin.NewDataKey("tenant", "label-producer")]
+	assert.True(t, ok, "stamp must read from the configured producer, not the default")
+}
+
+func TestPreRequest_PrependNormalizesMissingLeadingSlash(t *testing.T) {
+	ep := makeEndpoint(t, map[fwkplugin.DataKey]attrstring.Value{pathPrefixKey(): "laneA"})
+	h := newTestHandler(stampRule{headerName: ":path", mode: modePrepend, dataKey: pathPrefixKey()})
+	request := &fwksched.InferenceRequest{Headers: map[string]string{":path": "/v1/chat/completions"}}
+
+	require.NoError(t, h.PreRequest(context.Background(), request, schedulingResult(ep)))
+	assert.Equal(t, "/laneA/v1/chat/completions", request.Headers[":path"],
+		"a slash-less attribute value must still yield a valid prefixed path")
 }

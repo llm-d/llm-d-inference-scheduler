@@ -42,19 +42,13 @@ type EndpointMetadata struct {
 	MetricsHost string
 	Labels      map[string]string
 	// Attributes holds discovery-declared string attributes for the endpoint
-	// (e.g. a file-discovery entry's attributes section). They are stamped
-	// onto the endpoint's attribute map at construction, keyed with
-	// DiscoveryAttributesProducer.
+	// (e.g. a file-discovery entry's attributes section), surfaced on the
+	// endpoint by the attributes-producer extractor.
 	Attributes map[string]string
 	// RankIndex is this endpoint's position in the pool's TargetPorts,
 	// identifying the pod-local rank in multi-port deployments.
 	RankIndex int
 }
-
-// DiscoveryAttributesProducer is the producer name under which
-// discovery-declared EndpointMetadata.Attributes are stamped onto the
-// endpoint's attribute map.
-const DiscoveryAttributesProducer = "discovery"
 
 // String returns a string representation of the endpoint.
 func (epm *EndpointMetadata) String() string {

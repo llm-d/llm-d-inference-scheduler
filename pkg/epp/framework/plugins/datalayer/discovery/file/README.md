@@ -117,7 +117,7 @@ A peer may serve its pool metrics on a different host or port than its routable 
 
 ## Endpoint attributes
 
-An entry may declare an `attributes` section: string key/value pairs stamped onto the endpoint's attribute map at construction (keyed with the `discovery` producer), for downstream plugins to consume through the framework's declared data dependencies. For example, the `endpoint-header-stamper` PreRequest plugin can prepend such an attribute to the request path, so endpoints behind one shared gateway host are discriminated by path instead of needing a hostname per endpoint:
+An entry may declare an `attributes` section: string key/value pairs published on the endpoint as dynamic attributes (resolved on read, so edits to a watched file take effect) and surfaced by the `attributes-producer` extractor for downstream plugins to consume through the framework's declared data dependencies. For example, the `endpoint-header-stamper` PreRequest plugin can prepend such an attribute to the request path, so endpoints behind one shared gateway host are discriminated by path instead of needing a hostname per endpoint:
 
 ```yaml
 endpoints:
@@ -133,42 +133,4 @@ endpoints:
       pathPrefix: "/model-b"
 ```
 
-```yaml
-# EndpointPickerConfig (excerpt)
-plugins:
-  - type: endpoint-header-stamper
-    parameters:
-      stamps:
-        - attributeKey: pathPrefix
-          headerName: ":path"
-          mode: prepend
-```
-
-The same mechanism serves header-based discrimination: declare a `model` attribute per entry and stamp it as a request header the shared gateway can `HeaderMatch` on — `set` mode overwrites the header (so a client-supplied value can never pick the endpoint), `prepend` mode is for `:path` prefixing.
-
-```yaml
-endpoints:
-  - name: "in-sea-001-a"
-    address: "shared-gw.example.com"
-    port: "80"
-    attributes:
-      model: "fp8A"
-  - name: "in-sea-001-b"
-    address: "shared-gw.example.com"
-    port: "80"
-    attributes:
-      model: "fp8B"
-```
-
-```yaml
-# EndpointPickerConfig (excerpt)
-plugins:
-  - type: endpoint-header-stamper
-    parameters:
-      stamps:
-        - attributeKey: model
-          headerName: "x-llm-d-model"
-          mode: set
-```
-
-
+See the [`endpoint-header-stamper` README](../../../requestcontrol/headerstamp/README.md) for stamp configuration (`:path` prepend and header `set` variants, proxy support notes).

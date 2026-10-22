@@ -15,12 +15,14 @@ limitations under the License.
 */
 
 // Package headerstamp provides a PreRequest plugin that carries attributes of
-// the selected endpoint onto outgoing request headers. The canonical pairing
-// is the label-producer extractor (which turns discovery labels into string
-// attributes) with stamps declared here, so any discovery source can publish
-// routing hints that downstream gateways match on — e.g. a pathPrefix label
+// the selected endpoint onto outgoing request headers. By default stamps read
+// attributes produced by the attributes-producer extractor (producer name
+// "attributes-producer", which surfaces discovery-declared
+// EndpointMetadata.Attributes); attributeProducerName selects any other
+// producer instance, e.g. label-producer. The attribute value lands on a
+// request header a downstream gateway matches on — e.g. a pathPrefix attribute
 // prepended to :path so peers behind one shared gateway host are
-// discriminated by path, or a model label stamped as x-llm-d-model for
+// discriminated by path, or a model attribute stamped as x-llm-d-model for
 // header matching.
 package headerstamp
 
@@ -30,11 +32,12 @@ import (
 	"fmt"
 	"strings"
 
-	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrc "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	attrstring "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/string"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/extractor/attribute"
+	"github.com/llm-d/llm-d-router/pkg/epp/util/request"
 )
 
 // PluginType is the plugin type for the endpoint header stamper.
@@ -60,8 +63,8 @@ type stamp struct {
 type parameters struct {
 	Stamps []stamp `json:"stamps"`
 	// AttributeProducerName selects the producer whose attributes are read.
-	// Defaults to fwkdl.DiscoveryAttributesProducer — the key discovery-
-	// declared endpoint attributes are stamped with.
+	// Defaults to the attributes-producer instance type name, which surfaces
+	// discovery-declared EndpointMetadata.Attributes.
 	AttributeProducerName string `json:"attributeProducerName,omitempty"`
 }
 
@@ -83,12 +86,22 @@ func Factory(name string, rawParameters *json.Decoder, _ fwkplugin.Handle) (fwkp
 		return nil, fmt.Errorf("invalid configuration for '%s' plugin: 'stamps' must be non-empty", PluginType)
 	}
 	if params.AttributeProducerName == "" {
-		params.AttributeProducerName = fwkdl.DiscoveryAttributesProducer
+		params.AttributeProducerName = attribute.AttributeProducerType
 	}
 	rules := make([]stampRule, 0, len(params.Stamps))
 	for _, s := range params.Stamps {
 		if s.AttributeKey == "" || s.HeaderName == "" {
 			return nil, fmt.Errorf("invalid configuration for '%s' plugin: every stamp needs attributeKey and headerName", PluginType)
+		}
+		headerName := strings.ToLower(s.HeaderName)
+		// Stamping a system-owned header silently no-ops (stripped on the way
+		// out); stamping an internal routing header redirects sidecar P/D
+		// traffic. Both are configuration errors, not surprises.
+		if request.IsSystemOwnedHeader(headerName) {
+			return nil, fmt.Errorf("invalid configuration for '%s' plugin: headerName %q is EPP-owned and stripped on the way out", PluginType, s.HeaderName)
+		}
+		if request.InternalRoutingHeaders.Has(headerName) {
+			return nil, fmt.Errorf("invalid configuration for '%s' plugin: headerName %q is an internal routing header and must not be stamped", PluginType, s.HeaderName)
 		}
 		mode := s.Mode
 		if mode == "" {
@@ -98,7 +111,7 @@ func Factory(name string, rawParameters *json.Decoder, _ fwkplugin.Handle) (fwkp
 			return nil, fmt.Errorf("invalid configuration for '%s' plugin: stamp mode %q must be %q or %q", PluginType, s.Mode, modeSet, modePrepend)
 		}
 		rules = append(rules, stampRule{
-			headerName: strings.ToLower(s.HeaderName),
+			headerName: headerName,
 			mode:       mode,
 			dataKey:    fwkplugin.NewDataKey(s.AttributeKey, params.AttributeProducerName),
 		})
@@ -157,7 +170,9 @@ func (h *Handler) PreRequest(_ context.Context, request *fwksched.InferenceReque
 		}
 		switch r.mode {
 		case modePrepend:
-			prefix := strings.TrimSuffix(string(v), "/")
+			// Guarantee exactly one separator: an attribute value without a
+			// leading slash would otherwise concatenate onto the header value.
+			prefix := "/" + strings.Trim(string(v), "/")
 			request.Headers[r.headerName] = prefix + request.Headers[r.headerName]
 		default:
 			request.Headers[r.headerName] = string(v)
