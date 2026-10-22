@@ -115,8 +115,10 @@ func (m *legacyMessagesMode) useLegacy(ctx context.Context, tk tokenizer, model 
 
 func (b renderBackend) renderLegacyMessages(ctx context.Context, body *fwkrh.InferenceRequestBody) (*fwkrh.TokenizedRequest, error) {
 	payload := legacyMessagesPayload(body.Messages)
-	baseline := prepareLegacyMessagesToolFields(body, payload)
-	ctx = context.WithValue(ctx, renderToolBaselineCtxKey{}, baseline)
+	baseline := prepareLegacyMessagesToolFields(body, payload, toolcalling.TelemetryEnabled(ctx))
+	if baseline != nil {
+		ctx = context.WithValue(ctx, renderToolBaselineCtxKey{}, baseline)
+	}
 	payload["model"] = b.modelName
 	tokenIDs, mmFeatures, err := b.tk.RenderChat(ctx, payload)
 	if err != nil {
@@ -130,7 +132,7 @@ func (b renderBackend) renderLegacyMessages(ctx context.Context, body *fwkrh.Inf
 
 // Compare the expected Chat representation of the original Messages fields.
 // Request spans retain the original API surface and sanitized summary.
-func prepareLegacyMessagesToolFields(body *fwkrh.InferenceRequestBody, payload fwkrh.PayloadMap) *renderToolBaseline {
+func prepareLegacyMessagesToolFields(body *fwkrh.InferenceRequestBody, payload fwkrh.PayloadMap, telemetryEnabled bool) *renderToolBaseline {
 	var raw []byte
 	switch source := body.WirePayload().(type) {
 	case fwkrh.RawPayload:
@@ -155,11 +157,18 @@ func prepareLegacyMessagesToolFields(body *fwkrh.InferenceRequestBody, payload f
 		Tools:      envelope[string(toolcalling.FieldTools)],
 		ToolChoice: envelope[string(toolcalling.FieldToolChoice)],
 	}
-	sourceSnapshot, err := toolcalling.CaptureValidatedRequestJSON(reqcommon.APITypeMessages, raw)
-	if err != nil {
-		return nil
+	var sourceSnapshot toolcalling.RequestSnapshot
+	if telemetryEnabled {
+		var err error
+		sourceSnapshot, err = toolcalling.CaptureValidatedRequestJSON(reqcommon.APITypeMessages, raw)
+		if err != nil {
+			return nil
+		}
 	}
-	expected := fwkrh.PayloadMap{}
+	var expected fwkrh.PayloadMap
+	if telemetryEnabled {
+		expected = fwkrh.PayloadMap{}
+	}
 	if fields.Tools != nil {
 		var tools []fwkrh.AnthropicTool
 		if json.Unmarshal(fields.Tools, &tools) != nil {
@@ -169,7 +178,9 @@ func prepareLegacyMessagesToolFields(body *fwkrh.InferenceRequestBody, payload f
 		if tools != nil && len(tools) == 0 {
 			converted = []any{}
 		}
-		expected[string(toolcalling.FieldTools)] = converted
+		if telemetryEnabled {
+			expected[string(toolcalling.FieldTools)] = converted
+		}
 		if len(tools) == 0 && len(body.Messages.Tools) == 0 {
 			payload[string(toolcalling.FieldTools)] = converted
 		}
@@ -177,15 +188,18 @@ func prepareLegacyMessagesToolFields(body *fwkrh.InferenceRequestBody, payload f
 	if fields.ToolChoice != nil {
 		choice, parallel, translated := legacyMessagesToolChoice(fields.ToolChoice)
 		payload[string(toolcalling.FieldToolChoice)] = choice
-		if translated {
+		if translated && telemetryEnabled {
 			expected[string(toolcalling.FieldToolChoice)] = choice
 		}
 		if parallel != nil {
 			payload[string(toolcalling.FieldParallelToolCalls)] = *parallel
-			if translated {
+			if translated && telemetryEnabled {
 				expected[string(toolcalling.FieldParallelToolCalls)] = *parallel
 			}
 		}
+	}
+	if !telemetryEnabled {
+		return nil
 	}
 	normalized, err := expected.Marshal()
 	if err != nil {

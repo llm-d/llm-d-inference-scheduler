@@ -425,7 +425,7 @@ func (r *vllmHTTPRenderer) postJSON(ctx context.Context, path string, body fwkrh
 		}
 	}
 	var toolStatuses []toolcalling.FieldStatus
-	if ctx.Value(unobservedRenderCtxKey{}) == nil {
+	if toolcalling.TelemetryEnabled(ctx) && ctx.Value(unobservedRenderCtxKey{}) == nil {
 		switch path {
 		case chatRenderPath, messagesRenderPath, responsesRenderPath:
 			// Telemetry capture failures must not change rendering behavior.
@@ -466,7 +466,9 @@ func (r *vllmHTTPRenderer) postJSON(ctx context.Context, path string, body fwkrh
 	if err != nil {
 		return fmt.Errorf("pick render endpoint: %w", err)
 	}
-	eppmetrics.RecordToolCallingFieldStatuses(componentTokenizerHTTP, toolcalling.DirectionRequest, toolStatuses)
+	if len(toolStatuses) > 0 {
+		eppmetrics.RecordToolCallingFieldStatuses(componentTokenizerHTTP, toolcalling.DirectionRequest, toolStatuses)
+	}
 	picker, canRetry := r.endpointPicker.(retryingRenderEndpointPicker)
 	retryable, attemptErr := r.postJSONAttempt(reqCtx, baseURL, path, payload, out)
 	if attemptErr == nil || !retryable || !canRetry || reqCtx.Err() != nil {

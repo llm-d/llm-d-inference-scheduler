@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/toolcalling"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
@@ -650,7 +651,7 @@ func TestLegacyResponsesToolFields(t *testing.T) {
 			require.NoError(t, err)
 			p := newTestPlugin(renderer)
 			p.backend = renderBackend{tk: renderer, modelName: "m", legacyResponses: legacyResponsesForced()}
-			require.NoError(t, p.Produce(t.Context(), &scheduling.InferenceRequest{Body: parsed.Body}, nil))
+			require.NoError(t, p.Produce(toolcalling.WithTelemetryEnabled(t.Context()), &scheduling.InferenceRequest{Body: parsed.Body}, nil))
 			after := renderToolFieldCounts(t)
 			for key, count := range before {
 				after[key] -= count

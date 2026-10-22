@@ -162,6 +162,7 @@ func TestProduce_HTTPToolCallingSummary(t *testing.T) {
 			}
 			request.Body.Payload = fwkrh.RawPayload(tc.raw)
 			ctx := context.Background()
+			ctx = toolcalling.WithTelemetryEnabled(ctx)
 			if tc.warmup {
 				ctx = withUnobservedRender(ctx)
 			} else if tc.api != reqcommon.APITypeCompletions && json.Valid([]byte(tc.raw)) {

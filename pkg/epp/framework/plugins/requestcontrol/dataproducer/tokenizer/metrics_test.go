@@ -78,7 +78,9 @@ func TestRenderToolFieldMetrics(t *testing.T) {
 		status           int
 		warmup           bool
 		transform        bool
+		disabled         bool
 	}{
+		{name: "disabled", path: chatRenderPath, body: `{"tools":[]}`, disabled: true},
 		{name: "chat", path: chatRenderPath, body: `{"tools":[],"tool_choice":"auto","parallel_tool_calls":false,"response_format":{"type":"json_object"}}`, fields: []toolcalling.Field{toolcalling.FieldTools, toolcalling.FieldToolChoice, toolcalling.FieldParallelToolCalls, toolcalling.FieldResponseFormat}, transform: true},
 		{name: "messages", path: messagesRenderPath, body: `{"tools":[],"tool_choice":{"type":"any"}}`, fields: []toolcalling.Field{toolcalling.FieldTools, toolcalling.FieldToolChoice}},
 		{name: "responses", path: responsesRenderPath, body: `{"tools":[],"tool_choice":"auto"}`, fields: []toolcalling.Field{toolcalling.FieldTools, toolcalling.FieldToolChoice}},
@@ -97,6 +99,9 @@ func TestRenderToolFieldMetrics(t *testing.T) {
 				_, _ = io.WriteString(w, `{"token_ids":[1]}`)
 			})
 			ctx := t.Context()
+			if !tc.disabled {
+				ctx = toolcalling.WithTelemetryEnabled(ctx)
+			}
 			if tc.warmup {
 				ctx = withUnobservedRender(ctx)
 			}
@@ -145,7 +150,7 @@ func TestRenderToolFieldMetrics_Retry(t *testing.T) {
 	}
 	request := chatRequest()
 	request.Body.Payload = fwkrh.RawPayload(`{"tools":[]}`)
-	err = newTestPlugin(renderer).Produce(t.Context(), request, nil)
+	err = newTestPlugin(renderer).Produce(toolcalling.WithTelemetryEnabled(t.Context()), request, nil)
 	require.NoError(t, err)
 	require.Equal(t, 2, calls)
 	after := renderToolFieldCounts(t)
@@ -176,7 +181,7 @@ func TestProduce_ToolRenderOutcomes(t *testing.T) {
 			})
 			request := chatRequest()
 			request.Body.Payload = fwkrh.RawPayload(`{"tools":[{"type":"function","function":{"name":"private_tool"}}]}`)
-			err := newTestPlugin(renderer).Produce(t.Context(), request, nil)
+			err := newTestPlugin(renderer).Produce(toolcalling.WithTelemetryEnabled(t.Context()), request, nil)
 			require.Equal(t, tc.reason != "", err != nil)
 			assert.Equal(t, tc.reason == "" && tc.spanResult != resultSkippedNoTokens, request.Body.TokenizedRequest != nil)
 			count, _ := renderHistogram(t, renderer.pluginName, tc.result)

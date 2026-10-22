@@ -984,7 +984,7 @@ func TestLegacyProduceMessagesToolChoice(t *testing.T) {
 			require.NoError(t, err)
 			p := newTestPlugin(newHTTPRenderer(t, srv))
 			p.backend = renderBackend{tk: p.backend.(renderBackend).tk, modelName: "m", legacyMessages: &legacyMessagesMode{mode: messagesRenderModeLegacy}}
-			require.NoError(t, p.Produce(t.Context(), &scheduling.InferenceRequest{Body: parsed.Body}, nil))
+			require.NoError(t, p.Produce(toolcalling.WithTelemetryEnabled(t.Context()), &scheduling.InferenceRequest{Body: parsed.Body}, nil))
 			require.Equal(t, fwkrh.RawPayload(raw), parsed.Body.WirePayload())
 			if tc.want == "" {
 				require.NotContains(t, received, "tool_choice")
@@ -1057,7 +1057,7 @@ func TestLegacyMessagesRenderFieldChanges(t *testing.T) {
 				parsed.Body.Messages.Tools[0].Name = tc.value.(string)
 			}
 			payload := legacyMessagesPayload(parsed.Body.Messages)
-			baseline := prepareLegacyMessagesToolFields(parsed.Body, payload)
+			baseline := prepareLegacyMessagesToolFields(parsed.Body, payload, true)
 			require.NotNil(t, baseline)
 			if tc.value == nil {
 				delete(payload, tc.field)
@@ -1082,6 +1082,7 @@ func TestLegacyMessagesRenderFieldChanges(t *testing.T) {
 			inbound, err := toolcalling.CaptureRequestJSON(reqcommon.APITypeMessages, []byte(raw))
 			require.NoError(t, err)
 			ctx = toolcalling.WithRequestSnapshot(ctx, []byte(raw), inbound)
+			ctx = toolcalling.WithTelemetryEnabled(ctx)
 			var out renderResponse
 			require.NoError(t, renderer.postJSON(ctx, chatRenderPath, payload, time.Second, &out))
 			after := renderToolFieldCounts(t)
@@ -1114,7 +1115,7 @@ func TestLegacyMessagesInvalidToolChoiceIsChanged(t *testing.T) {
 				Payload:  fwkrh.RawPayload(raw),
 			}
 			payload := fwkrh.PayloadMap{}
-			baseline := prepareLegacyMessagesToolFields(body, payload)
+			baseline := prepareLegacyMessagesToolFields(body, payload, true)
 			require.NotNil(t, baseline)
 			forwardedJSON, err := payload.Marshal()
 			require.NoError(t, err)
@@ -1131,6 +1132,21 @@ func TestLegacyMessagesInvalidToolChoiceIsChanged(t *testing.T) {
 			t.Fatal("missing tool_choice status")
 		})
 	}
+}
+
+func TestLegacyMessagesPayloadWithTelemetryDisabled(t *testing.T) {
+	raw := []byte(`{"messages":[{"role":"user","content":"hi"}],"tools":[],"tool_choice":{"type":"any","disable_parallel_tool_use":true}}`)
+	parsed, err := anthropic.NewAnthropicParser().ParseRequest(t.Context(), raw, map[string]string{":path": reqcommon.PathMessages})
+	require.NoError(t, err)
+	enabled := legacyMessagesPayload(parsed.Body.Messages)
+	require.NotNil(t, prepareLegacyMessagesToolFields(parsed.Body, enabled, true))
+	disabled := legacyMessagesPayload(parsed.Body.Messages)
+	require.Nil(t, prepareLegacyMessagesToolFields(parsed.Body, disabled, false))
+	enabledJSON, err := enabled.Marshal()
+	require.NoError(t, err)
+	disabledJSON, err := disabled.Marshal()
+	require.NoError(t, err)
+	require.JSONEq(t, string(enabledJSON), string(disabledJSON))
 }
 
 func TestLegacyProduceMessages(t *testing.T) {

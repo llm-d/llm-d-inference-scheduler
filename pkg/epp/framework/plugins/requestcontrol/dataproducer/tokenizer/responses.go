@@ -153,8 +153,10 @@ func (b renderBackend) renderLegacyResponses(ctx context.Context, body *fwkrh.In
 	if err != nil {
 		return nil, err
 	}
-	if baseline := prepareLegacyResponsesToolFields(body); baseline != nil {
-		ctx = context.WithValue(ctx, renderToolBaselineCtxKey{}, baseline)
+	if toolcalling.TelemetryEnabled(ctx) {
+		if baseline := prepareLegacyResponsesToolFields(body); baseline != nil {
+			ctx = context.WithValue(ctx, renderToolBaselineCtxKey{}, baseline)
+		}
 	}
 	payload["model"] = b.modelName
 	tokenIDs, mmFeatures, err := b.tk.RenderChat(ctx, payload)
