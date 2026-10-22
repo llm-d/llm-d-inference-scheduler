@@ -108,6 +108,18 @@ func (ep *endpoint) Clone() fwkdl.AttributeMap {
 	return ep.AttributeMap.Clone()
 }
 
+// Peek returns an uncloned attribute view when the embedded map supports it.
+// Callers must not mutate the result. Falls back to Get otherwise.
+func (ep *endpoint) Peek(key fwkplugin.DataKey) (fwkdl.Cloneable, bool) {
+	type peeker interface {
+		Peek(fwkplugin.DataKey) (fwkdl.Cloneable, bool)
+	}
+	if p, ok := ep.AttributeMap.(peeker); ok {
+		return p.Peek(key)
+	}
+	return ep.Get(key)
+}
+
 type endpoint struct {
 	*fwkdl.EndpointMetadata
 	*fwkdl.Metrics
