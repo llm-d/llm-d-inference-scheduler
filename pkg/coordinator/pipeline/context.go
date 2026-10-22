@@ -177,8 +177,9 @@ type RequestContext struct {
 	// Populated by EncodeStep when the EC connector is ec-nixl; empty for
 	// ec-shared-storage.
 	ECTransferParams []map[string]any
-	// KVTransferParams carries transfer parameters from prefill to decode.
-	// PrefillStep reads them from the response or creates SGLang bootstrap fields.
+	// KVTransferParams carries the prefill pod's KV-cache transfer hints to the
+	// decode step. Populated by PrefillStep; consumed by the KV connector when
+	// building the decode request.
 	KVTransferParams map[string]any
 	// Prefill owns a streaming prefill request that overlaps later steps.
 	Prefill *PendingPrefill

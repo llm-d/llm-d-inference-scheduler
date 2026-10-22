@@ -369,8 +369,8 @@ response_headers_to_add:
 
 Both coordinator gateway configurations, [single EPP](../deploy/environments/dev/coordinator-e2e-infra/envoy.yaml)
 and [three EPPs](../deploy/environments/dev/coordinator-e2e-infra/envoy-3-epp.yaml),
-include this header on the prefill route. Configure EPP with
-`header-profile-handler`, `sglanghttp-parser`, and the prefill/decode role filters.
+include this header on the prefill route. Activate `sglanghttp-parser` in EPP.
+For a shared EPP, use `header-profile-handler` and the prefill/decode role filters.
 For Rust frontends without `/metrics`, use `endpoint-notification-source`,
 `inflight-load-producer`, and `concurrency-detector` instead of metric polling.
 
@@ -387,9 +387,7 @@ later prefill failures are logged. Prefill events are limited to 4 MiB each.
 Response buffering filters and upstream retries that can change the worker are
 unsupported.
 
-OpenAI APIs, rendering, encode orchestration, and multi-DP are unsupported for
-this flow. Native `/generate` preserves the SGLang wire format regardless of
-`use_openai_format`.
+OpenAI APIs, rendering, and encode orchestration are unsupported for this flow.
 
 ### Cross-phase scheduling headers
 

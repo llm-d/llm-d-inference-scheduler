@@ -89,8 +89,9 @@ const (
 	FieldMediaIOKwargs        = "media_io_kwargs"
 	FieldOutput               = "output"
 
-	// SGLang bootstrap coordination fields. The native /generate API carries
-	// them at the top level of both prefill and decode requests.
+	// SGLang bootstrap coordination fields, carried inside kv_transfer_params.
+	// The prefill pod echoes them back so the decode pod can open the bootstrap
+	// channel to it.
 	FieldBootstrapHost = "bootstrap_host"
 	FieldBootstrapPort = "bootstrap_port"
 	FieldBootstrapRoom = "bootstrap_room"

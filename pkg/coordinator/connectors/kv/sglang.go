@@ -76,10 +76,10 @@ func resolveSGLangBootstrapPort(ctx context.Context) int {
 }
 
 // sglangKV implements the SGLang KV transfer protocol. Both prefill and decode
-// receive bootstrap coordination fields (port and room ID). PrefillStep retains
-// these fields and adds the selected prefill host from the response header;
-// PrepareDecodeKVParams forwards them so the decode pod can open the bootstrap
-// channel to the prefill pod.
+// receive bootstrap coordination fields (port and room ID). PrefillStep
+// retains these fields in reqCtx.KVTransferParams;
+// PrepareDecodeKVParams forwards those verbatim so the decode pod can open the
+// bootstrap channel to the prefill pod.
 type sglangKV struct{}
 
 func (sglangKV) Name() string { return SGLang }
