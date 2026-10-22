@@ -40,7 +40,7 @@ type toolCallingPassthroughBody struct {
 }
 
 func observeToolCallingPassthrough(r *http.Request, api reqcommon.APIType) {
-	if api != reqcommon.APITypeChatCompletions && api != reqcommon.APITypeMessages || r.Body == nil || r.Body == http.NoBody {
+	if !toolCallingTelemetryEnabled(r.Context()) || api != reqcommon.APITypeChatCompletions && api != reqcommon.APITypeMessages || r.Body == nil || r.Body == http.NoBody {
 		return
 	}
 	span, _ := r.Context().Value(toolCallingRequestSpanKey).(trace.Span)

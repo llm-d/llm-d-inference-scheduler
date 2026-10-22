@@ -129,7 +129,7 @@ func TestSidecarToolCallingOTLP(t *testing.T) {
 						if connector == "sglang" {
 							kvConnector = constants.KVConnectorSGLang
 						}
-						s := NewProxy(Config{Port: "8000", DecoderURL: decoderURL, KVConnector: kvConnector})
+						s := NewProxy(Config{Port: "8000", DecoderURL: decoderURL, KVConnector: kvConnector, EnableToolCallingTelemetry: true})
 						s.logger = logger
 						s.allowlistValidator = &AllowlistValidator{}
 						handler := otelhttp.NewHandler(s.createRoutes(), "sidecar-http", otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
@@ -459,7 +459,7 @@ func TestToolCallingRequestSpans(t *testing.T) {
 				defer prefill.Close()
 				prefillURL, err := url.Parse(prefill.URL)
 				require.NoError(t, err)
-				s := NewProxy(Config{Port: "8000", DecoderURL: prefillURL})
+				s := NewProxy(Config{Port: "8000", DecoderURL: prefillURL, EnableToolCallingTelemetry: true})
 				s.allowlistValidator = &AllowlistValidator{}
 				s.decoderProxy = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					_, err := io.Copy(io.Discard, r.Body)
@@ -600,7 +600,7 @@ func TestPDToolCallingStageSpans(t *testing.T) {
 					defer prefill.Close()
 					prefillURL, err := url.Parse(prefill.URL)
 					require.NoError(t, err)
-					s := NewProxy(Config{DecoderURL: prefillURL, KVConnector: constants.KVConnectorNIXLV2,
+					s := NewProxy(Config{DecoderURL: prefillURL, KVConnector: constants.KVConnectorNIXLV2, EnableToolCallingTelemetry: true,
 						MoRIIOWriteMode: connector == "parallel", MoRIIOParallelDispatch: connector == "parallel",
 						MoRIIODecodePodIP: "127.0.0.1", MoRIIOParallelDecodeWaitTimeout: time.Second})
 					s.allowlistValidator = &AllowlistValidator{}
@@ -698,7 +698,7 @@ func TestPDToolCallingSummaryOnSetupFailure(t *testing.T) {
 				provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
 				t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
 				useTracerProviderForTest(t, provider)
-				s := NewProxy(Config{MooncakeBootstrapPort: bootstrapPort})
+				s := NewProxy(Config{MooncakeBootstrapPort: bootstrapPort, EnableToolCallingTelemetry: true})
 				if connector == "nixl" {
 					s.nixlRequestIDFn = func() (string, error) { return "", errors.New("request ID failure") }
 				}

@@ -32,6 +32,15 @@ import (
 const toolCallingBaselineKey contextKey = "toolCallingBaseline"
 const toolCallingRequestSpanKey contextKey = "toolCallingRequestSpan"
 
+type toolCallingTelemetryEnabledKey struct{}
+
+func toolCallingTelemetryEnabled(ctx context.Context) bool {
+	// The HTTP handler supplies an explicit setting. Internal callers without
+	// one retain the connector helpers' existing observation behavior.
+	enabled, set := ctx.Value(toolCallingTelemetryEnabledKey{}).(bool)
+	return !set || enabled
+}
+
 // toolCallingRequest is owned by the dispatching goroutine. Comparisons for
 // asynchronous prefill must be aggregated before starting its goroutine, so
 // reporting does not require waiting for prefill to finish.
@@ -65,6 +74,9 @@ func captureToolCallingRequestBody(apiType reqcommon.APIType, body []byte, valid
 
 // Inference handoffs reuse the client snapshot, with independent dispatch outcomes.
 func captureInferenceToolCallingRequest(r *http.Request, apiType reqcommon.APIType, body []byte) (*toolCallingRequest, error) {
+	if !toolCallingTelemetryEnabled(r.Context()) {
+		return nil, nil //nolint:nilnil // Disabled observation has no capture or error.
+	}
 	baseline, ok := r.Context().Value(toolCallingBaselineKey).(*toolCallingRequest)
 	var captured *toolCallingRequest
 	if !ok {
@@ -88,14 +100,20 @@ func captureInferenceToolCallingRequest(r *http.Request, apiType reqcommon.APITy
 }
 
 func (r *toolCallingRequest) setRequestSpanAttributes(ctx context.Context) {
+	if r == nil {
+		return
+	}
 	span, _ := ctx.Value(toolCallingRequestSpanKey).(trace.Span)
-	if r != nil && span != nil && span.IsRecording() {
+	if span != nil && span.IsRecording() {
 		span.SetAttributes(r.original.SpanAttributes(r.statuses)...)
 	}
 }
 
 // The dispatch owner finalizes the request before its span ends, even on abort.
 func (r *toolCallingRequest) report(ctx context.Context) {
+	if r == nil {
+		return
+	}
 	metrics.RecordToolCallingFieldStatuses(r.fieldStatuses())
 	r.setRequestSpanAttributes(ctx)
 }

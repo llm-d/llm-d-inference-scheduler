@@ -899,10 +899,12 @@ func TestConcurrentPDConnectorToolCallingMetrics(t *testing.T) {
 				decodeStatus, wantCode                 int
 				cachedBootstrap, invalidTarget         bool
 				denyTarget, baselineError, wantForward bool
+				disabled                               bool
 				wantFields                             []toolcalling.Field
 				wantChoice                             toolcalling.FieldStatusValue
 			}{
 				{name: "chat fields", body: chatBody, wantCode: 200, wantForward: true, wantFields: chatFields},
+				{name: "telemetry disabled", body: chatBody, wantCode: 200, wantForward: true, disabled: true},
 				{name: "messages fields", api: reqcommon.APITypeMessages, body: messagesBody, wantCode: 200, wantForward: true, wantFields: messagesFields},
 				{name: "null and empty fields", body: `{"tools":[],"tool_choice":null}`, wantCode: 200, wantForward: true, wantFields: messagesFields},
 				{name: "non-tool body", body: `{"messages":[]}`, wantCode: 200, wantForward: true},
@@ -955,7 +957,7 @@ func TestConcurrentPDConnectorToolCallingMetrics(t *testing.T) {
 					require.NoError(t, err)
 					decodeURL, err := url.Parse(decode.URL)
 					require.NoError(t, err)
-					s := NewProxy(Config{DecoderURL: decodeURL, KVConnector: connector})
+					s := NewProxy(Config{DecoderURL: decodeURL, KVConnector: connector, EnableToolCallingTelemetry: !tt.disabled})
 					s.logger = log.Log
 					s.allowlistValidator = &AllowlistValidator{enabled: tt.denyTarget}
 					target := prefillURL.Host
@@ -1140,7 +1142,7 @@ func TestSharedStorageToolCallingMetrics(t *testing.T) {
 			require.NoError(t, err)
 			decodeURL, err := url.Parse(decode.URL)
 			require.NoError(t, err)
-			s := NewProxy(Config{DecoderURL: decodeURL, KVConnector: constants.KVConnectorSharedStorage})
+			s := NewProxy(Config{DecoderURL: decodeURL, KVConnector: constants.KVConnectorSharedStorage, EnableToolCallingTelemetry: true})
 			s.logger = log.Log
 			s.allowlistValidator = &AllowlistValidator{enabled: false}
 			target := prefillURL.Host
@@ -1534,9 +1536,11 @@ func TestChunkedDecodeToolCallingMetrics(t *testing.T) {
 			stream    bool
 			fallback  bool
 			nonTool   bool
+			disabled  bool
 			failChunk int
 		}{
 			{name: "multiple chunks"},
+			{name: "telemetry disabled", disabled: true},
 			{name: "streaming", stream: true},
 			{name: "single chunk fallback", fallback: true},
 			{name: "non tool", nonTool: true},
@@ -1576,7 +1580,7 @@ func TestChunkedDecodeToolCallingMetrics(t *testing.T) {
 				require.NoError(t, err)
 				prefillURL, err := url.Parse(prefill.URL)
 				require.NoError(t, err)
-				s := NewProxy(Config{Port: "8000", DecoderURL: decodeURL, KVConnector: constants.KVConnectorNIXLV2,
+				s := NewProxy(Config{Port: "8000", DecoderURL: decodeURL, KVConnector: constants.KVConnectorNIXLV2, EnableToolCallingTelemetry: !tt.disabled,
 					ECConnector: constants.ECConnectorNIXL, EnableP2PPull: true, DecodeChunkSize: 3})
 				s.logger = log.Log
 				s.allowlistValidator = &AllowlistValidator{}
@@ -1640,7 +1644,7 @@ func TestChunkedDecodeToolCallingMetrics(t *testing.T) {
 					}
 				}
 				want := map[[2]string]float64{}
-				if !tt.nonTool {
+				if !tt.nonTool && !tt.disabled {
 					for _, field := range []toolcalling.Field{toolcalling.FieldTools, toolcalling.FieldToolChoice, toolcalling.FieldParallelToolCalls, toolcalling.FieldResponseFormat} {
 						want[[2]string{string(field), string(toolcalling.FieldStatusPreserved)}] = 1
 					}
@@ -1786,7 +1790,9 @@ func TestDecoderOnlyToolCallingMetrics(t *testing.T) {
 		unknownLength bool
 		status        int
 		fields        []toolcalling.Field
+		disabled      bool
 	}{
+		{name: "telemetry disabled", body: chatBody, disabled: true},
 		{name: "Chat fields", body: chatBody, fields: chatFields},
 		{name: "Messages fields", api: reqcommon.APITypeMessages, body: chatBody, fields: []toolcalling.Field{toolcalling.FieldTools, toolcalling.FieldToolChoice}},
 		{name: "unknown length", body: chatBody, unknownLength: true, fields: chatFields},
@@ -1819,7 +1825,7 @@ func TestDecoderOnlyToolCallingMetrics(t *testing.T) {
 				defer upstream.Close()
 				upstreamURL, err := url.Parse(upstream.URL)
 				require.NoError(t, err)
-				s := NewProxy(Config{DecoderURL: upstreamURL})
+				s := NewProxy(Config{DecoderURL: upstreamURL, EnableToolCallingTelemetry: !tt.disabled})
 				s.logger = log.Log
 				s.allowlistValidator = &AllowlistValidator{}
 				routes := s.createRoutes()
@@ -1944,7 +1950,7 @@ func TestHandleNIXLV2SerialToolCallingMetrics(t *testing.T) {
 			require.NoError(t, parseErr)
 			prefillURL, parseErr := url.Parse(prefill.URL)
 			require.NoError(t, parseErr)
-			s := NewProxy(Config{DecoderURL: decodeURL, KVConnector: constants.KVConnectorNIXLV2, PrefillMaxRetries: 2})
+			s := NewProxy(Config{DecoderURL: decodeURL, KVConnector: constants.KVConnectorNIXLV2, PrefillMaxRetries: 2, EnableToolCallingTelemetry: true})
 			s.logger = log.Log
 			s.allowlistValidator = &AllowlistValidator{enabled: tt.denyTarget}
 			if tt.requestIDError {
