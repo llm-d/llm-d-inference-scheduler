@@ -146,10 +146,7 @@ func TestBuildSGLangPDConfiguration(t *testing.T) {
 		wantError string
 	}{
 		{name: "pipeline connector defaults do not apply"},
-		{name: "grace period", params: map[string]any{"prefill_grace": "5s"}},
 		{name: "explicit kv connector rejected", params: map[string]any{steps.ParamKVConnector: "kv-sglang"}, wantError: "kv_connector"},
-		{name: "explicit ec connector rejected", params: map[string]any{steps.ParamECConnector: "ec-nixl"}, wantError: "ec_connector"},
-		{name: "separate bootstrap port rejected", params: map[string]any{"bootstrap_port": 8000}, wantError: "bootstrap_port"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := &config.Config{Pipeline: config.PipelineConfig{

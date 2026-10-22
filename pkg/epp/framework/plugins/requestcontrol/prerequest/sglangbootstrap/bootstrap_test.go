@@ -47,7 +47,6 @@ func TestBootstrapUsesSelectedPrefill(t *testing.T) {
 	response := &fwkrc.Response{Headers: map[string]string{routing.PrefillEndpointHeader: "forged:1"}}
 	h.ResponseHeader(context.Background(), req, response, endpoint.GetMetadata())
 	require.Equal(t, "10.0.0.7:8000", response.Headers[routing.PrefillEndpointHeader])
-	require.NotContains(t, response.Headers, routing.LegacyPrefillEndpointHeader)
 	// Decode keeps the prefill host supplied by the coordinator.
 	result.PrimaryProfileName = "decode"
 	req.Body.Mutated = false

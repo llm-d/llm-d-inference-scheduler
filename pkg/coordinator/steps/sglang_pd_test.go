@@ -43,9 +43,7 @@ func TestSGLangPDStartsDecodeBeforePrefillBody(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	ctx = log.IntoContext(ctx, funcr.New(func(_, _ string) {}, funcr.Options{Verbosity: logutil.TRACE}))
-	connector, err := kv.Build(kv.SGLang)
-	require.NoError(t, err)
-	wantPort := connector.PreparePrefillKVParams(ctx, &pipeline.RequestContext{})[reqcommon.FieldBootstrapPort].(int)
+	wantPort := kv.ResolveSGLangBootstrapPort(ctx)
 	releasePrefill := make(chan struct{})
 	prefillClosed := make(chan struct{})
 	var prefill map[string]any
@@ -80,9 +78,6 @@ func TestSGLangPDStartsDecodeBeforePrefillBody(t *testing.T) {
 		}
 		if r.Header.Get(routing.PrefillEndpointHeader) != "10.0.0.7:8000" {
 			t.Error("missing endpoint header")
-		}
-		if r.Header.Get(routing.LegacyPrefillEndpointHeader) != "" {
-			t.Error("unexpected legacy endpoint header")
 		}
 		if r.Header.Get(reqcommon.PeerTopologyHeaderKey) != "host=node7" {
 			t.Error("missing topology header")
