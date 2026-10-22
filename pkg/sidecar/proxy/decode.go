@@ -140,7 +140,7 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 	// without re-encoding them.
 	if requestMayCallTools(body) {
 		s.logger.V(logging.DEBUG).Info("chunked decode: tools requested, using regular decode")
-		s.decoderProxy.ServeHTTP(w, r)
+		regularDecode()
 		return
 	}
 

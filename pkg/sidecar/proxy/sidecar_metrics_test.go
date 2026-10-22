@@ -1533,12 +1533,13 @@ func TestHandleNIXLV2SerialMetrics(t *testing.T) {
 }
 
 func TestChunkedDecodeToolCallingMetrics(t *testing.T) {
-	const fields = `"tools":[{"function":{"parameters":{"z":9007199254740993,"a":1}}}],"tool_choice":"auto","parallel_tool_calls":false,"response_format":null`
+	const fields = `"tools":[{"function":{"parameters":{"z":9007199254740993,"a":1}}}],"tool_choice":"none","parallel_tool_calls":false,"response_format":null`
 	for _, route := range []string{"direct", "nixl", "peer", "self", "encoder"} {
 		for _, tt := range []struct {
 			name      string
 			stream    bool
 			fallback  bool
+			bypass    bool
 			nonTool   bool
 			disabled  bool
 			failChunk int
@@ -1547,6 +1548,7 @@ func TestChunkedDecodeToolCallingMetrics(t *testing.T) {
 			{name: "telemetry disabled", disabled: true},
 			{name: "streaming", stream: true},
 			{name: "single chunk fallback", fallback: true},
+			{name: "tool call bypass", bypass: true},
 			{name: "non tool", nonTool: true},
 			{name: "second chunk error retains outcomes", failChunk: 2},
 		} {
@@ -1595,7 +1597,11 @@ func TestChunkedDecodeToolCallingMetrics(t *testing.T) {
 				}
 				body := fmt.Sprintf(`{"messages":[{"role":"user","content":"hi"}],"max_tokens":%d,"stream":%t`, budget, tt.stream)
 				if !tt.nonTool {
-					body += "," + fields
+					toolFields := fields
+					if tt.bypass {
+						toolFields = strings.Replace(fields, `"tool_choice":"none"`, `"tool_choice":"auto"`, 1)
+					}
+					body += "," + toolFields
 				}
 				body += "}"
 				r := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(body))
@@ -1618,7 +1624,7 @@ func TestChunkedDecodeToolCallingMetrics(t *testing.T) {
 				if tt.failChunk > 0 {
 					code = http.StatusBadRequest
 				}
-				if tt.fallback {
+				if tt.fallback || tt.bypass {
 					count = 1
 				}
 				require.Equal(t, code, rw.Code, rw.Body.String())
@@ -1635,7 +1641,7 @@ func TestChunkedDecodeToolCallingMetrics(t *testing.T) {
 						}
 					}
 				}
-				if tt.failChunk == 0 && !tt.fallback {
+				if tt.failChunk == 0 && !tt.fallback && !tt.bypass {
 					if tt.stream {
 						require.Equal(t, "text/event-stream", rw.Header().Get("Content-Type"))
 						require.Equal(t, 4, strings.Count(rw.Body.String(), reqcommon.SSEDataPrefix))
