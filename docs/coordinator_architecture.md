@@ -340,12 +340,11 @@ for the comparison.
 
 ### Streaming SGLang prefill and decode
 
-For native SGLang `/generate` requests with `stream: true`, use `kv-sglang` with
-the `prefill` and `decode` steps:
+Native SGLang `/generate` supports DP1 with `stream: true` and
+`sampling_params.n` absent or 1. Use the existing prefill and decode steps:
 
 ```yaml
 pipeline:
-  use_openai_format: true
   kv_connector: kv-sglang
   steps:
     - type: prefill
@@ -354,83 +353,43 @@ pipeline:
     - type: decode
 ```
 
-Set `SGLANG_BOOTSTRAP_PORT` to the prefill worker's bootstrap service port,
-reachable from both worker roles. The Rust frontend serves bootstrap on its HTTP
-port (for example, 8000). See [KV and EC transfer protocols](#kv-and-ec-transfer-protocols)
-for the shared setting. `prefill_grace` bounds prefill cleanup after decode succeeds.
+Set `SGLANG_BOOTSTRAP_PORT` to the prefill worker's bootstrap service port.
+The Rust frontend serves bootstrap on its HTTP port (for example, 8000).
 
-The prefill step uses `kv-sglang` to create a numeric `bootstrap_room` and select the
-`bootstrap_port` shared by both requests.
-The prefill EPP sets `bootstrap_host` in the request body and returns the selected
-worker's HTTP address in `x-llm-d-prefiller-host-port`. On receiving those response
-headers, the coordinator sends decode with the same endpoint header and bootstrap
-fields. EPP selects decode independently and strips incoming worker-address
-headers; SGLang uses the bootstrap fields in the body.
+On the gateway's prefill route, expose the worker address with Envoy's native
+[response header formatting](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/headers.html#custom-request-response-headers):
+
+```yaml
+response_headers_to_add:
+  - header:
+      key: x-llm-d-prefiller-host-port
+      value: "%UPSTREAM_HOST%"
+    append_action: OVERWRITE_IF_EXISTS_OR_ADD
+```
+
+Both coordinator gateway configurations, [single EPP](../deploy/environments/dev/coordinator-e2e-infra/envoy.yaml)
+and [three EPPs](../deploy/environments/dev/coordinator-e2e-infra/envoy-3-epp.yaml),
+include this header on the prefill route. Configure EPP with
+`header-profile-handler`, `sglanghttp-parser`, and the prefill/decode role filters.
+For Rust frontends without `/metrics`, use `endpoint-notification-source`,
+`inflight-load-producer`, and `concurrency-detector` instead of metric polling.
+
+The KV connector creates a numeric `bootstrap_room` and `bootstrap_port` shared
+by both requests. SGLang starts the streaming response before generated frames
+are available. On receiving the response headers, the coordinator derives
+`bootstrap_host` from the endpoint header and starts decode with the bootstrap
+fields and that header. EPP selects the decode worker independently.
 
 Prefill drains concurrently with decode. Prefill errors or EOF without `[DONE]`
 cancel decode. Client cancellation and decode failure cancel prefill. Successful
 decode allows prefill up to `prefill_grace` to finish without delaying the client;
 later prefill failures are logged. Prefill events are limited to 4 MiB each.
+Response buffering filters and upstream retries that can change the worker are
+unsupported.
 
-Add these plugins to the EPP configuration, with the existing `prefill` and `decode`
-scheduling profiles and their role filters:
-
-```yaml
-plugins:
-  - type: header-profile-handler
-  - type: sglanghttp-parser
-  - type: sglang-bootstrap-handler
-    parameters:
-      profileName: prefill
-  - type: endpoint-notification-source
-  - type: inflight-load-producer
-  - type: concurrency-detector
-    parameters:
-      maxConcurrency: 8
-requestHandler:
-  parsers:
-    - pluginRef: sglanghttp-parser
-dataLayer:
-  injectDefaults: false
-  sources:
-    - pluginRef: endpoint-notification-source
-      extractors:
-        - pluginRef: inflight-load-producer
-flowControl:
-  saturationDetector:
-    pluginRef: concurrency-detector
-```
-
-The concurrency detector supports Rust frontend versions without `/metrics`.
-Set `maxConcurrency` to the deployment's per-endpoint request limit. Use
-`header-profile-handler` to route the coordinator's prefill and decode requests
-directly to workers. The bootstrap plugin must run on the prefill EPP.
-
-Envoy must use `response_header_mode: SEND` and `response_body_mode: STREAMED` or
-`FULL_DUPLEX_STREAMED` for ext_proc. Full-duplex mode also requires
-`response_trailer_mode: SEND`, as in the
-[coordinator gateway configuration](../deploy/environments/dev/coordinator-e2e-infra/envoy.yaml). Request bodies must be processed so EPP can
-apply the bootstrap host mutation. Response buffering filters and upstream retries
-that can change the selected worker are unsupported. No custom Envoy build or 103
-response is involved. See the [ext_proc processing modes](https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/filters/http/ext_proc/v3/processing_mode.proto).
-
-SGLang's [Python native handler](https://github.com/sgl-project/sglang/blob/881bd9f972d251ef54c53883a2bc0fc64ee592ba/python/sglang/srt/entrypoints/http_server.py#L930)
-and [Rust native handler](https://github.com/sgl-project/sglang/blob/94602c9c2b7cbdb8efd5c52802dac6a1c180089e/rust/sglang-server/src/api_server/native_api.rs#L271)
-start the streaming response before generated frames are available. Response
-headers acknowledge response start; they do not establish KV readiness.
-
-The step supports one native streaming request with `sampling_params.n` absent
-or 1. OpenAI APIs, rendering, and encode orchestration are unsupported. Pipeline
-connector defaults and `use_openai_format` do not apply to this step; retain the
-default `use_openai_format` value.
-
-The [coordinator E2E test](../test/coordinator/e2e/coordinator/sglang_pd_test.go)
-verifies early decode and bootstrap body mutation through the shared Envoy
-deployment and production EPP, with fixture workers that hold prefill open until
-decode arrives. It runs in both coordinator E2E topologies with
-`make -f Makefile.coord.mk test-e2e-coordinator` and
-`make -f Makefile.coord.mk test-e2e-coordinator-3epp`.
-Real SGLang KV transfer requires separate GPU validation.
+OpenAI APIs, rendering, encode orchestration, and multi-DP are unsupported for
+this flow. Native `/generate` preserves the SGLang wire format regardless of
+`use_openai_format`.
 
 ### Cross-phase scheduling headers
 
@@ -519,9 +478,10 @@ KV connector protocols ([pkg/coordinator/connectors/kv/](../pkg/coordinator/conn
 | `kv-sglang` | `sglang` | SGLang bootstrap: `bootstrap_host`, `bootstrap_port`, `bootstrap_room`. |
 | `kv-shared-storage` | `shared-storage` | Shared filesystem / object store: prefill writes KV, decode reads it; no transfer descriptor on the wire. |
 
-The `kv-sglang` connector reads `SGLANG_BOOTSTRAP_PORT` once on the first prefill
-request, defaulting to 8998. Invalid values select the default and are logged at
-error level.
+The `kv-sglang` `bootstrap_port` advertised to prefill pods defaults to 8998 and can be
+overridden process-wide with the `SGLANG_BOOTSTRAP_PORT` environment variable. The value
+is read once on the first prefill request that uses the connector; a non-integer value is
+rejected in favor of the default and logged at error level.
 
 EC connector protocols ([pkg/coordinator/connectors/ec/](../pkg/coordinator/connectors/ec/)) ship encoder
 embeddings from encode pods to the prefill pod:
@@ -729,10 +689,10 @@ edit: registration is the only wiring step.
 - Config values arrive as `map[string]any` decoded by viper. Integers decode as `int`,
   booleans as `bool`, durations as `string` (parse with `time.ParseDuration`), strings
   as `string`. Type-assert defensively and supply a default when the key is absent.
-- Connector defaults are injected into step `params` (see
-  [Connector selection](#connector-selection)). The constants are
-  `steps.ParamKVConnector` and `steps.ParamECConnector`. `use_openai_format` is
-  injected only into `encode` and `prefill`.
+- Connector names (`kv_connector`, `ec_connector`) and `use_openai_format` are injected
+  into every step's `params` by the entrypoint before the factory runs (see below), so a
+  step can read them without the operator repeating them per step. The constants are
+  `steps.ParamKVConnector` and `steps.ParamECConnector`.
 - Shared parsing helpers live in [pkg/coordinator/steps/utils.go](../pkg/coordinator/steps/utils.go)
   (`parseUseOpenAIFormat`, `resolveFormat`, `buildPrefillMMFeatures`, `copyBody`,
   `coerceParamsMap`). Reuse them rather than re-implementing.
@@ -825,8 +785,8 @@ documented example is `COORDINATOR_PIPELINE_USE_OPENAI_FORMAT`. The CLI flag `-v
 ### Connector selection
 
 `pipeline.kv_connector` and `pipeline.ec_connector` are deployment-wide defaults. The
-builder injects them into step `params`. Connector-using steps must agree with the
-connector configured on the model-serving pods.
+entrypoint injects them into every step's `params` so each step constructs the matching
+connector. They must agree with the connector configured on the vLLM pods.
 
 | Key | Values | Default |
 | :---- | :---- | :---- |

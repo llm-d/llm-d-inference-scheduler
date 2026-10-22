@@ -181,6 +181,11 @@ func TestNewWithForwardResponseHeaders_RejectsInvalidNames(t *testing.T) {
 
 func TestPipeline_AbortsOnError(t *testing.T) {
 	executed := map[string]bool{}
+	finished := false
+	reqCtx := &RequestContext{Prefill: &PendingPrefill{Finish: func(success bool) {
+		require.False(t, success)
+		finished = true
+	}}}
 	steps := []Step{
 		&mockStep{name: "a", fn: func(_ context.Context, _ *RequestContext) error {
 			executed["a"] = true
@@ -193,7 +198,9 @@ func TestPipeline_AbortsOnError(t *testing.T) {
 	}
 
 	p := New(steps)
-	err := p.Execute(context.Background(), &RequestContext{})
+	err := p.Execute(context.Background(), reqCtx)
+	require.True(t, finished)
+	require.Nil(t, reqCtx.Prefill)
 	if err == nil {
 		t.Fatal("expected error")
 	}

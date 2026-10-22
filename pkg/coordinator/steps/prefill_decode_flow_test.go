@@ -46,7 +46,6 @@ func TestSGLangPrefillDecode(t *testing.T) {
 	for _, mode := range []string{"early decode", "prefill error", "prefill abort", "prefill EOF", "error before headers", "client cancellation", "decode failure", "grace expiry", "missing endpoint"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			t.Cleanup(cancel)
 			releasePrefill := make(chan struct{})
 			prefillClosed := make(chan struct{})
 			decodeStarted := make(chan struct{})
@@ -67,6 +66,9 @@ func TestSGLangPrefillDecode(t *testing.T) {
 				}
 				w.Header().Set(reqcommon.HeaderContentType, request.MediaTypeEventStream)
 				if r.Header.Get(reqcommon.EPPProfileHeaderKey) == gateway.PhasePrefill {
+					if _, present := body[reqcommon.FieldBootstrapHost]; present {
+						t.Error("prefill must omit bootstrap_host")
+					}
 					prefill = body
 					defer close(prefillClosed)
 					if mode != "missing endpoint" {
@@ -126,7 +128,7 @@ func TestSGLangPrefillDecode(t *testing.T) {
 			coordinator := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requestCtx := log.IntoContext(r.Context(), funcr.New(func(_, _ string) {}, funcr.Options{Verbosity: logutil.TRACE}))
 				err := p.Execute(requestCtx, &pipeline.RequestContext{OriginalPath: reqcommon.PathSGLangGenerate, Stream: true,
-					Body: map[string]any{"text": "hello", "stream": true, "sampling_params": map[string]any{"max_new_tokens": 1}}, ResponseWriter: w})
+					Body: map[string]any{"text": "hello", "stream": true, reqcommon.FieldBootstrapHost: "untrusted", "sampling_params": map[string]any{"max_new_tokens": 1}}, ResponseWriter: w})
 				var streamed *pipeline.UpstreamStreamedError
 				if err != nil && r.Context().Err() == nil && !errors.As(err, &streamed) {
 					http.Error(w, err.Error(), http.StatusBadGateway)

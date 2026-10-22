@@ -114,7 +114,6 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/sessionstate"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/headerstamp"
-	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/prerequest/sglangbootstrap"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/requestattributereporter"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/requestheader/agentidentity"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/requestheader/outlenbucket"
@@ -675,7 +674,6 @@ func (r *Runner) registerInTreePlugins() {
 	// request control response-received handlers
 	// Alpha
 	fwkplugin.Register(topologystamp.PluginType, fwkplugin.StabilityAlpha, topologystamp.Factory)
-	fwkplugin.Register(sglangbootstrap.PluginType, fwkplugin.StabilityAlpha, sglangbootstrap.Factory)
 
 	// bylabel role filters
 	// Stable
