@@ -200,6 +200,9 @@ an exemplar link configured to a traces backend.
 
 ### Tool-calling request integrity
 
+EPP collects tool-calling telemetry when `--enable-tool-calling-telemetry` is set. The
+flag defaults to false. Trace export also requires tracing to be enabled.
+
 This counter records observed outcomes for supported tool-calling request fields. It does not
 include field values or request content.
 
@@ -226,6 +229,32 @@ EPP reports `rejected` only for a supported field identified by the parser as ca
 request to fail. This covers invalid JSON types in `tools` for Chat Completions and Messages,
 including typed fields within Messages tool definitions. EPP does not add validation rules
 for fields the parsers accept.
+
+### Tool-calling response traces
+
+When EPP processes a Chat Completions or Messages response, including provider-prefixed
+endpoints, recording request spans receive four boolean attributes if the incoming request
+has `llm_d.tool_calling.present=true`. Inspection supports JSON and SSE responses. Presence
+covers non-empty Chat Completions `tool_calls` or legacy `function_call` fields and Messages
+`tool_use` blocks.
+
+| Trace attribute | Meaning |
+|---|---|
+| `llm_d.tool_calling.response.upstream_present` | Tool call observed in a completed JSON body or SSE event received by EPP. |
+| `llm_d.tool_calling.response.forwarded_present` | Tool call observed in a completed JSON body or SSE event whose body bytes were successfully sent to Envoy. |
+| `llm_d.tool_calling.response.upstream_detection_incomplete` | Upstream response interrupted or received content could not be fully inspected. |
+| `llm_d.tool_calling.response.forwarded_detection_incomplete` | Forwarding interrupted or sent content could not be fully inspected. |
+
+During inspection, malformed JSON, unfinished SSE data events, and SSE events exceeding the
+1 MiB buffer limit set the corresponding incomplete flag. SSE events require a terminating blank line.
+A `*_present=false` value with `*_detection_incomplete=true` leaves tool-call presence unknown.
+Presence can remain `true` alongside an incomplete flag after an observed event and a later
+interruption. Each direction stops inspecting events after detecting presence, so these flags
+do not validate all later SSE events or tool arguments.
+
+Forwarded observations confirm successful ext-proc sends to Envoy; application receipt and semantic
+preservation of tool calls remain unverified. These attributes contain no response bodies,
+tool names, or tool arguments, and do not measure model-server tool-parser quality.
 
 ### Inference pool
 

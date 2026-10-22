@@ -18,6 +18,7 @@ package toolcalling
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -113,10 +114,23 @@ type RequestSnapshot struct {
 	summary RequestSummary
 }
 
-// CanSkipCapture reports whether no supported fields need comparison.
-// The snapshot must be empty, and body must contain no field names or JSON escapes.
-// It does not validate JSON syntax.
+type telemetryEnabledContextKey struct{}
+
+// WithTelemetryEnabled lets downstream request processing observe tool fields.
+func WithTelemetryEnabled(ctx context.Context) context.Context {
+	return context.WithValue(ctx, telemetryEnabledContextKey{}, true)
+}
+
+// TelemetryEnabled reports whether tool-specific observations are enabled.
+func TelemetryEnabled(ctx context.Context) bool {
+	enabled, _ := ctx.Value(telemetryEnabledContextKey{}).(bool)
+	return enabled
+}
+
+// CanSkipCapture reports whether an empty snapshot and a body without JSON
+// escapes contain no supported field keys. It does not validate JSON syntax.
 func (snapshot RequestSnapshot) CanSkipCapture(body []byte) bool {
+	// Escaped keys can spell supported fields without their literal bytes.
 	if len(snapshot.fields) != 0 || bytes.IndexByte(body, '\\') >= 0 {
 		return false
 	}
@@ -124,10 +138,26 @@ func (snapshot RequestSnapshot) CanSkipCapture(body []byte) bool {
 	if err != nil {
 		return false
 	}
-	for _, field := range fields {
-		if bytes.Contains(body, []byte(field)) {
+	// Field words in prompt strings do not require another capture.
+	for len(body) > 0 {
+		start := bytes.IndexByte(body, '"')
+		if start < 0 {
+			break
+		}
+		body = body[start+1:]
+		end := bytes.IndexByte(body, '"')
+		if end < 0 {
 			return false
 		}
+		rest := bytes.TrimLeft(body[end+1:], " \t\r\n")
+		if len(rest) > 0 && rest[0] == ':' {
+			for _, field := range fields {
+				if bytes.Equal(body[:end], []byte(field)) {
+					return false
+				}
+			}
+		}
+		body = body[end+1:]
 	}
 	return true
 }
