@@ -111,7 +111,7 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 	// tool_choice stay raw (not in inspectedRequestFields), so inspect their bytes
 	// without re-encoding them.
 	if requestMayCallTools(body) {
-		s.logger.V(logging.DEBUG).Info("chunked decode: tools requested, using regulat decode")
+		s.logger.V(logging.DEBUG).Info("chunked decode: tools requested, using regular decode")
 		s.decoderProxy.ServeHTTP(w, r)
 		return
 	}
