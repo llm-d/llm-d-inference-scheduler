@@ -21,6 +21,7 @@ import (
 	compbasemetrics "k8s.io/component-base/metrics"
 
 	metricsutil "github.com/llm-d/llm-d-router/pkg/common/observability/metrics"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/toolcalling"
 )
 
 const (
@@ -249,7 +250,7 @@ var (
 			Name:      "scheduler_e2e_duration_seconds",
 			Help:      metricsutil.HelpMsgWithStability("End-to-end scheduling latency distribution in seconds.", compbasemetrics.ALPHA),
 			Buckets: []float64{
-				0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1,
+				0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1,
 			},
 		},
 		[]string{},
@@ -572,11 +573,52 @@ var (
 	)
 )
 
+// --- Tool-calling request field integrity metric ---
+var llmdToolCallingFieldStatusTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Subsystem: LLMDRouterEndpointPickerSubsystem,
+		Name:      "tool_calling_field_status_total",
+		Help:      metricsutil.HelpMsgWithStability("Tool-calling request field outcomes by component, direction, field, and status.", compbasemetrics.ALPHA),
+	},
+	[]string{
+		toolcalling.MetricLabelComponent,
+		toolcalling.MetricLabelDirection,
+		toolcalling.MetricLabelField,
+		toolcalling.MetricLabelStatus,
+	},
+)
+
 var (
 	// DescInferencePoolPerEndpointQueueSize is the standardized exported prometheus descriptor.
 	DescInferencePoolPerEndpointQueueSize = prometheus.NewDesc(
 		"llm_d_epp_per_endpoint_queue_size",
 		metricsutil.HelpMsgWithStability("The total number of requests pending in the model server queue for each underlying endpoint.", compbasemetrics.ALPHA),
+		[]string{
+			"name",
+			"model_server_endpoint",
+		}, nil,
+	)
+
+	// The NIXL descriptors expose counters the model server reports.
+	DescInferencePoolPerEndpointNixlFailedTransfers = prometheus.NewDesc(
+		"llm_d_epp_per_endpoint_nixl_failed_transfers_total",
+		metricsutil.HelpMsgWithStability("The number of failed NIXL KV cache transfers reported by each underlying endpoint.", compbasemetrics.ALPHA),
+		[]string{
+			"name",
+			"model_server_endpoint",
+		}, nil,
+	)
+	DescInferencePoolPerEndpointNixlFailedNotifications = prometheus.NewDesc(
+		"llm_d_epp_per_endpoint_nixl_failed_notifications_total",
+		metricsutil.HelpMsgWithStability("The number of failed NIXL KV cache notifications reported by each underlying endpoint.", compbasemetrics.ALPHA),
+		[]string{
+			"name",
+			"model_server_endpoint",
+		}, nil,
+	)
+	DescInferencePoolPerEndpointNixlKVExpiredRequests = prometheus.NewDesc(
+		"llm_d_epp_per_endpoint_nixl_kv_expired_requests_total",
+		metricsutil.HelpMsgWithStability("The number of requests whose KV cache expired before it was read, reported by each underlying endpoint.", compbasemetrics.ALPHA),
 		[]string{
 			"name",
 			"model_server_endpoint",

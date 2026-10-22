@@ -66,12 +66,15 @@ func newDecodeProxyRequest(ctx context.Context, logger logr.Logger, step string,
 		return nil, fmt.Errorf("%s: creating request: %w", step, err)
 	}
 	proxyReq.ContentLength = int64(len(bodyBytes))
-	proxyReq.Header.Set(gateway.ContentTypeHeader, gateway.ContentTypeJSON)
+	proxyReq.Header.Set(gateway.ContentTypeHeader, reqcommon.ContentTypeJSON)
 	for k, v := range reqCtx.ForwardedHeaders() {
 		proxyReq.Header.Set(k, v)
 	}
 	proxyReq.Header.Set(reqcommon.RequestIDHeaderKey, reqCtx.RequestID)
 	proxyReq.Header.Set(reqcommon.EPPProfileHeaderKey, gateway.PhaseDecode)
+	if reqCtx.PeerTopology != "" {
+		proxyReq.Header.Set(reqcommon.PeerTopologyHeaderKey, reqCtx.PeerTopology)
+	}
 	for k, v := range extraHeaders {
 		proxyReq.Header.Set(k, v)
 	}
@@ -120,8 +123,13 @@ func newDecodeProxy(logger logr.Logger, transport http.RoundTripper, modifyRespo
 		Director:      func(_ *http.Request) {}, //nolint:staticcheck // SA1019: Rewrite does not append X-Forwarded-For, which Director does.
 		FlushInterval: -1,
 		Transport:     transport,
+		// A decode profile's response headers are otherwise copied verbatim to
+		// the client; strip coordinator-internal headers (e.g. the peer-topology
+		// header, meaningful only between the prefill and decode legs) so a
+		// plugin configured on the decode profile cannot leak them to the caller.
 		ModifyResponse: func(resp *http.Response) error {
 			out.Status = resp.StatusCode
+			pipeline.StripInternalHeaders(resp.Header)
 			if modifyResponse != nil {
 				return modifyResponse(resp)
 			}

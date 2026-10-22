@@ -30,10 +30,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-logr/logr"
 	"github.com/llm-d/llm-d-async/api"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	coordmetrics "github.com/llm-d/llm-d-router/pkg/coordinator/metrics"
+	"github.com/llm-d/llm-d-router/pkg/coordinator/metrics/metricstest"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/steps"
 )
@@ -234,7 +237,9 @@ func TestAsyncBrokerRejections(t *testing.T) {
 			step, _ := newAsyncTestStep(t, nil)
 			reqCtx, rec := asyncReqCtx(t, tc.body, tc.headers)
 			err := step.Execute(t.Context(), reqCtx)
-			require.True(t, errors.Is(err, pipeline.ErrPipelineDone), "want ErrPipelineDone, got %v", err)
+			require.Error(t, err)
+			require.False(t, errors.Is(err, pipeline.ErrPipelineDone), "want a step error, got %v", err)
+			assert.Equal(t, coordmetrics.ErrorCodeBadRequest, coordmetrics.ClassifyErrorCode(err, pipeline.ClassifyOpts))
 			assert.Equal(t, http.StatusBadRequest, rec.Code)
 			assert.Contains(t, rec.Body.String(), tc.wantMsg)
 		})
@@ -280,7 +285,10 @@ func TestAsyncBrokerEnqueue(t *testing.T) {
 	assert.Equal(t, "/v1/chat/completions", envelope.Data.Endpoint)
 	assert.Equal(t, "team-a", envelope.Data.Metadata["userid"])
 	assert.Equal(t, "00-abc-def-01", envelope.Data.Metadata["traceparent"])
-	assert.Equal(t, "test-model", envelope.Data.Payload["model"])
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(envelope.Data.Payload, &payload))
+	assert.Equal(t, "test-model", payload["model"])
+	assert.Equal(t, "test-model", envelope.Data.Model)
 	assert.Equal(t, "800", envelope.Data.Headers["x-llm-d-slo-ttft-ms"])
 	for k := range envelope.Data.Headers {
 		assert.NotEqual(t, "x-llm-d-async-mode", strings.ToLower(k))
@@ -291,6 +299,54 @@ func TestAsyncBrokerEnqueue(t *testing.T) {
 	exists, err := rdb.Exists(t.Context(), api.RequestActiveTokenKey(envelopeID("team-a", "req-test-1"))).Result()
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), exists)
+}
+
+func TestAsyncBrokerEnqueueFailure(t *testing.T) {
+	reg := metricstest.NewRegistry(t, coordmetrics.Register, coordmetrics.Reset)
+	step, _ := newAsyncTestStep(t, nil)
+	require.NoError(t, step.rdb.Close())
+	reqCtx, rec := asyncReqCtx(t, `{"model":"test-model"}`,
+		map[string]string{defaultModeHeader: "enqueue", defaultTenantHeader: "team-a"})
+
+	err := step.Execute(t.Context(), reqCtx)
+	require.Error(t, err)
+	require.False(t, errors.Is(err, pipeline.ErrPipelineDone), "want a step error, got %v", err)
+	assert.Equal(t, coordmetrics.ErrorCodeUpstreamTransport, coordmetrics.ClassifyErrorCode(err, pipeline.ClassifyOpts))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Contains(t, rec.Body.String(), "ENQUEUE_FAILED")
+	assert.InDelta(t, 1.0, upstreamRequestCount(t, reg, coordmetrics.UpstreamAsyncBroker), 1e-9)
+}
+
+// A client gone before the enqueue returns is not counted as an error.
+func TestAsyncBrokerEnqueueClientGone(t *testing.T) {
+	step, _ := newAsyncTestStep(t, nil)
+	require.NoError(t, step.rdb.Close())
+	reqCtx, _ := asyncReqCtx(t, `{"model":"test-model"}`,
+		map[string]string{defaultModeHeader: "enqueue", defaultTenantHeader: "team-a"})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := step.Execute(ctx, reqCtx)
+	assert.True(t, errors.Is(err, pipeline.ErrPipelineDone), "want ErrPipelineDone, got %v", err)
+}
+
+func upstreamRequestCount(t *testing.T, reg *prometheus.Registry, upstream string) float64 {
+	t.Helper()
+	mfs, err := reg.Gather()
+	require.NoError(t, err)
+	for _, mf := range mfs {
+		if mf.GetName() != "llm_d_coordinator_upstream_request_total" {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			for _, l := range m.GetLabel() {
+				if l.GetName() == "upstream" && l.GetValue() == upstream {
+					return m.GetCounter().GetValue()
+				}
+			}
+		}
+	}
+	return 0
 }
 
 func TestAsyncBrokerWaitDeliversResult(t *testing.T) {
@@ -315,6 +371,90 @@ func TestAsyncBrokerWaitDeliversResult(t *testing.T) {
 	assert.Equal(t, int64(0), exists)
 }
 
+func TestAsyncBrokerWaitDeliversStoredError(t *testing.T) {
+	tests := []struct {
+		name       string
+		res        api.ResultMessage
+		wantStatus int
+		wantBody   string
+		wantCode   string
+	}{
+		{
+			name:       "upstream 4xx",
+			res:        api.ResultMessage{StatusCode: http.StatusNotFound, Payload: `{"error":"model not found"}`},
+			wantStatus: http.StatusNotFound,
+			wantBody:   "model not found",
+			wantCode:   coordmetrics.ErrorCodeUpstream4xx,
+		},
+		{
+			name:       "upstream 5xx",
+			res:        api.ResultMessage{StatusCode: http.StatusInternalServerError, Payload: `{"error":"worker failed"}`},
+			wantStatus: http.StatusInternalServerError,
+			wantBody:   "worker failed",
+			wantCode:   coordmetrics.ErrorCodeUpstream5xx,
+		},
+		{
+			name:       "malformed status",
+			res:        api.ResultMessage{StatusCode: 42, Payload: `{}`},
+			wantStatus: http.StatusBadGateway,
+			wantBody:   "MALFORMED_RESULT",
+			wantCode:   coordmetrics.ErrorCodeUpstream5xx,
+		},
+		{
+			name:       "gate dropped",
+			res:        api.ResultMessage{ErrorCode: api.ErrCodeGateDropped, ErrorMessage: "dropped"},
+			wantStatus: http.StatusTooManyRequests,
+			wantBody:   api.ErrCodeGateDropped,
+			wantCode:   coordmetrics.ErrorCodeUpstream4xx,
+		},
+		{
+			name:       "deadline exceeded",
+			res:        api.ResultMessage{ErrorCode: api.ErrCodeDeadlineExceeded, ErrorMessage: "too slow"},
+			wantStatus: http.StatusGatewayTimeout,
+			wantBody:   api.ErrCodeDeadlineExceeded,
+			wantCode:   coordmetrics.ErrorCodeUpstream5xx,
+		},
+		{
+			name:       "invalid request",
+			res:        api.ResultMessage{ErrorCode: api.ErrCodeInvalidRequest, ErrorMessage: "bad payload"},
+			wantStatus: http.StatusBadRequest,
+			wantBody:   api.ErrCodeInvalidRequest,
+			wantCode:   coordmetrics.ErrorCodeUpstream4xx,
+		},
+		{
+			name:       "cancelled",
+			res:        api.ResultMessage{ErrorCode: api.ErrCodeCancelled, ErrorMessage: "cancelled"},
+			wantStatus: 499,
+			wantBody:   api.ErrCodeCancelled,
+			wantCode:   coordmetrics.ErrorCodeUpstream4xx,
+		},
+		{
+			name:       "inference error",
+			res:        api.ResultMessage{ErrorCode: api.ErrCodeInferenceError, ErrorMessage: "worker crashed"},
+			wantStatus: http.StatusBadGateway,
+			wantBody:   api.ErrCodeInferenceError,
+			wantCode:   coordmetrics.ErrorCodeUpstream5xx,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			step, rdb := newAsyncTestStep(t, nil)
+			reqCtx, rec := asyncReqCtx(t, `{"model":"test-model"}`,
+				map[string]string{defaultModeHeader: "wait", defaultTenantHeader: "team-a"})
+			res, err := json.Marshal(tc.res)
+			require.NoError(t, err)
+			require.NoError(t, rdb.LPush(t.Context(), resultKey("team-a", "req-test-1"), string(res)).Err())
+
+			err = step.Execute(t.Context(), reqCtx)
+			require.Error(t, err)
+			require.False(t, errors.Is(err, pipeline.ErrPipelineDone), "want a step error, got %v", err)
+			assert.Equal(t, tc.wantCode, coordmetrics.ClassifyErrorCode(err, pipeline.ClassifyOpts))
+			assert.Equal(t, tc.wantStatus, rec.Code)
+			assert.Contains(t, rec.Body.String(), tc.wantBody)
+		})
+	}
+}
+
 func TestAsyncBrokerWaitCapFallsBackToPending(t *testing.T) {
 	step, _ := newAsyncTestStep(t, map[string]any{"wait_cap_seconds": 1})
 	reqCtx, rec := asyncReqCtx(t, `{"model":"test-model"}`,
@@ -337,7 +477,9 @@ func TestAsyncBrokerWaitDeadlineAnswersTimeout(t *testing.T) {
 
 	start := time.Now()
 	err := step.Execute(t.Context(), reqCtx)
-	require.True(t, errors.Is(err, pipeline.ErrPipelineDone))
+	require.Error(t, err)
+	require.False(t, errors.Is(err, pipeline.ErrPipelineDone), "want a step error, got %v", err)
+	assert.Equal(t, coordmetrics.ErrorCodeUpstream5xx, coordmetrics.ClassifyErrorCode(err, pipeline.ClassifyOpts))
 	assert.GreaterOrEqual(t, time.Since(start), time.Second)
 	assert.Equal(t, http.StatusGatewayTimeout, rec.Code)
 	assert.Contains(t, rec.Body.String(), api.ErrCodeDeadlineExceeded)
@@ -592,6 +734,104 @@ func TestAsyncBrokerFetchGraceConfig(t *testing.T) {
 	})
 }
 
+var errClientGone = errors.New("client gone")
+
+// failingWriter records the status it is given and fails every body write, as
+// a connection dropped mid-response does.
+type failingWriter struct {
+	header http.Header
+	status int
+}
+
+func newFailingWriter() *failingWriter { return &failingWriter{header: http.Header{}} }
+
+func (f *failingWriter) Header() http.Header        { return f.header }
+func (f *failingWriter) WriteHeader(statusCode int) { f.status = statusCode }
+func (f *failingWriter) Write([]byte) (int, error)  { return 0, errClientGone }
+
+func TestWriteResultReportsWriteFailure(t *testing.T) {
+	cases := map[string]api.ResultMessage{
+		"upstream payload":       {StatusCode: 200, Payload: `{"done":true}`},
+		"invalid stored status":  {StatusCode: 42, Payload: `{}`},
+		"gate dropped":           {ErrorCode: api.ErrCodeGateDropped, ErrorMessage: "dropped"},
+		"deadline exceeded":      {ErrorCode: api.ErrCodeDeadlineExceeded, ErrorMessage: "late"},
+		"invalid request":        {ErrorCode: api.ErrCodeInvalidRequest, ErrorMessage: "bad"},
+		"cancelled":              {ErrorCode: api.ErrCodeCancelled, ErrorMessage: "cancelled"},
+		"unmapped producer code": {ErrorCode: "SOMETHING_ELSE", ErrorMessage: "failed"},
+	}
+	for name, res := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, writeErr := writeResult(newFailingWriter(), &res)
+			assert.ErrorIs(t, writeErr, errClientGone)
+		})
+	}
+}
+
+// TestAsyncBrokerUndeliveredErrorResultIsRetained covers the cleanup paths
+// that reclaim the mailbox only after confirmed delivery: a stored error
+// result whose body write fails must stay fetchable by id.
+func TestAsyncBrokerUndeliveredErrorResultIsRetained(t *testing.T) {
+	seed := func(t *testing.T, rdb *redis.Client, id string) string {
+		t.Helper()
+		res, err := json.Marshal(api.ResultMessage{ErrorCode: api.ErrCodeGateDropped, ErrorMessage: "dropped"})
+		require.NoError(t, err)
+		key := resultKey("team-a", id)
+		require.NoError(t, rdb.LPush(t.Context(), key, string(res)).Err())
+		require.NoError(t, rdb.Expire(t.Context(), key, time.Hour).Err())
+		return key
+	}
+	assertRetained := func(t *testing.T, rdb *redis.Client, key string) {
+		t.Helper()
+		exists, err := rdb.Exists(t.Context(), key).Result()
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), exists)
+	}
+
+	t.Run("held wait", func(t *testing.T) {
+		step, rdb := newAsyncTestStep(t, nil)
+		reqCtx, _ := asyncReqCtx(t, `{"model":"test-model"}`,
+			map[string]string{defaultModeHeader: "wait", defaultTenantHeader: "team-a"})
+		w := newFailingWriter()
+		reqCtx.ResponseWriter = w
+		key := seed(t, rdb, "req-test-1")
+
+		err := step.Execute(t.Context(), reqCtx)
+		assert.Equal(t, coordmetrics.ErrorCodeUpstream4xx, coordmetrics.ClassifyErrorCode(err, pipeline.ClassifyOpts))
+		assert.Equal(t, http.StatusTooManyRequests, w.status)
+		assertRetained(t, rdb, key)
+	})
+
+	t.Run("fetch with zero grace", func(t *testing.T) {
+		step, rdb := newAsyncTestStep(t, map[string]any{"fetch_grace_seconds": 0})
+		key := seed(t, rdb, "eager-id")
+		r := chi.NewRouter()
+		step.RegisterRoutes(r)
+		req := httptest.NewRequest(http.MethodGet, "/v1/requests/eager-id", nil)
+		req.Header.Set(defaultTenantHeader, "team-a")
+
+		w := newFailingWriter()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusTooManyRequests, w.status)
+		assertRetained(t, rdb, key)
+	})
+
+	t.Run("fetch with grace", func(t *testing.T) {
+		step, rdb := newAsyncTestStep(t, map[string]any{"fetch_grace_seconds": 5})
+		key := seed(t, rdb, "grace-id")
+		r := chi.NewRouter()
+		step.RegisterRoutes(r)
+		req := httptest.NewRequest(http.MethodGet, "/v1/requests/grace-id", nil)
+		req.Header.Set(defaultTenantHeader, "team-a")
+
+		w := newFailingWriter()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusTooManyRequests, w.status)
+		ttl, err := rdb.TTL(t.Context(), key).Result()
+		require.NoError(t, err)
+		assert.Greater(t, ttl, 5*time.Second)
+	})
+}
+
 // TestAsyncQuotaFailsOpen covers the Redis-error branch: a limited tenant is
 // classified reserved (with the error surfaced) when the quota check cannot
 // run, so an outage never blocks live traffic.
@@ -671,6 +911,23 @@ func TestAsyncBrokerRetryReattaches(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, int64(0), exists, "retry should clear the tombstone")
 		assert.Equal(t, int64(1), queueLen(t, rdb))
+	})
+
+	t.Run("wait retry delivers a stored error", func(t *testing.T) {
+		step, rdb := newAsyncTestStep(t, nil)
+		res, err := json.Marshal(api.ResultMessage{StatusCode: http.StatusInternalServerError, Payload: `{"error":"worker failed"}`})
+		require.NoError(t, err)
+		require.NoError(t, rdb.LPush(t.Context(), resultKey("team-a", "job-r5"), string(res)).Err())
+		reqCtx, rec := asyncReqCtx(t, `{"model":"test-model"}`, map[string]string{
+			defaultModeHeader: "wait", defaultTenantHeader: "team-a", "X-Request-Id": "job-r5",
+		})
+		reqCtx.RequestID = "job-r5"
+		err = step.Execute(t.Context(), reqCtx)
+		require.Error(t, err)
+		require.False(t, errors.Is(err, pipeline.ErrPipelineDone), "want a step error, got %v", err)
+		assert.Equal(t, coordmetrics.ErrorCodeUpstream5xx, coordmetrics.ClassifyErrorCode(err, pipeline.ClassifyOpts))
+		require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+		assert.Equal(t, int64(0), queueLen(t, rdb), "no enqueue for a completed request")
 	})
 
 	t.Run("wait retry delivers the stored result", func(t *testing.T) {

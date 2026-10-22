@@ -411,9 +411,8 @@ func ConfigureMetricsTLS(opts *Options, mo *metricsserver.Options) error {
 }
 
 func (opts *Options) Validate() error {
-	if (opts.PoolName != "" && opts.EndpointSelector != nil) || (opts.PoolName == "" && opts.EndpointSelector == nil) {
-		return errors.New("either pool-name or endpoint-selector must be set")
-	}
+	// pool-name and endpoint-selector are checked on the Kubernetes discovery
+	// path only; file discovery reads neither.
 	if opts.EndpointSelector != nil {
 		if len(opts.EndpointTargetPorts) == 0 || len(opts.EndpointTargetPorts) > 8 {
 			return fmt.Errorf("flag %q should have length from 1 to 8", "endpoint-target-ports")
@@ -537,9 +536,6 @@ func parseTLSVersion(s string) (uint16, error) {
 func parseCipherSuites(names []string) ([]uint16, error) {
 	byName := make(map[string]uint16)
 	for _, cs := range tls.CipherSuites() {
-		byName[cs.Name] = cs.ID
-	}
-	for _, cs := range tls.InsecureCipherSuites() {
 		byName[cs.Name] = cs.ID
 	}
 	ids := make([]uint16, 0, len(names))

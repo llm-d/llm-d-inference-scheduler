@@ -59,9 +59,13 @@ The design enables:
 
 ### Routing Flow
 
-See the upstream [Request Scheduler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/scheduling.md) doc for the canonical scheduling model.
+See the upstream [Request Scheduler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/scheduling.md) doc for the canonical scheduling model.
 
 #### Request Control
+
+A configured `Responder` may answer a `GET` request locally before this flow starts. A local
+response skips flow-control, endpoint selection, screening, data production, admission
+plugins, and scheduling.
 
 Request control runs once per request before any scheduling profiles:
 
@@ -98,7 +102,7 @@ Each scheduling profile runs the following stages. Multiple profiles may run for
 
 The llm-d Endpoint Picker relies on a YAML-based configuration—provided either as a file or an in-line parameter—to determine which lifecycle hooks (plugins) are active.
 
-See the upstream [Configuration](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/configuration.md) doc for the canonical schema.
+See the upstream [Configuration](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/configuration.md) doc for the canonical schema.
 
 Specifically, this configuration establishes the following components:
 
@@ -287,7 +291,12 @@ The data layer follows a Source -> Extract -> Attribute lifecycle:
   usage, active adapters) or served models and LoRA adapters (via `/v1/models`); others react to
   endpoint or Kubernetes object change notifications
 - Extractors populate per-endpoint attributes in the shared datastore for scorers
-- Scoring can rely on numerical metrics or metadata (model ID, adapter tags)
+- Screeners and scoring can rely on numerical metrics or metadata (model ID, adapter tags)
+
+The `models-responder` uses the per-endpoint model attributes for both its pool-wide
+OpenAI-compatible `GET /v1/models` response and its request-control screening. The public
+response does not expose endpoint identity. Inference screening uses the endpoint attributes
+before profile selection.
 
 Polling sources share one Collector goroutine per endpoint. The base tick is
 `--refresh-metrics-interval` (default 50ms). Each polling source plugin accepts an
@@ -295,7 +304,7 @@ Polling sources share one Collector goroutine per endpoint. The base tick is
 when omitted, the source runs on every base tick. The runtime converts each source's
 interval to base-tick multiples and schedules dispatches accordingly.
 
-See the upstream [Data Layer](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/datalayer.md) doc for the canonical model.
+See the upstream [Data Layer](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/datalayer.md) doc for the canonical model.
 
 ---
 
@@ -363,8 +372,13 @@ Enable chunked decode via the pd-sidecar flag:
 | `--decode-chunk-size` | `0` (disabled) | Token budget per chunk. Set to a positive integer to enable chunked decode. For best performance use a multiple of the KV cache block size. |
 
 > [!NOTE]
-> If the request's `max_tokens` / `max_completion_tokens` is less than or equal to `--decode-chunk-size`,
-> the sidecar falls back to a single regular decode call without chunking.
+> The sidecar falls back to a single regular decode call without chunking in any of these cases:
+>
+> - the request's `max_tokens` / `max_completion_tokens` is less than or equal to `--decode-chunk-size`.
+> - the request sets `echo: true`, because the decoder would echo the accumulated assistant text on
+>   every chunk.
+> - the request sets `n` greater than 1, because each chunk would continue the text of the first
+>   choice for every choice.
 
 ---
 
@@ -391,11 +405,11 @@ Enable chunked decode via the pd-sidecar flag:
 
 ### Canonical llm-d architecture (upstream)
 
-- [Router overview](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/README.md)
-- [Proxy](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/proxy.md)
-- [Endpoint Picker (EPP)](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/README.md)
-- [Configuration](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/configuration.md)
-- [Request Scheduler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/scheduling.md)
-- [Request Handler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/request-handling.md)
-- [Flow Control](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/flow-control.md)
-- [Data Layer](https://github.com/llm-d/llm-d/blob/main/docs/architecture/core/router/epp/datalayer.md)
+- [Router overview](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/README.md)
+- [Proxy](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/proxy.md)
+- [Endpoint Picker (EPP)](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/epp.md)
+- [Configuration](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/configuration.md)
+- [Request Scheduler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/scheduling.md)
+- [Request Handler](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/request-handling.md)
+- [Flow Control](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/flow-control.md)
+- [Data Layer](https://github.com/llm-d/llm-d/blob/main/docs/architecture/router/datalayer.md)

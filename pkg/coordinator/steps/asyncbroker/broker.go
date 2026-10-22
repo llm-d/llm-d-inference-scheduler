@@ -18,6 +18,7 @@ package asyncbroker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -35,6 +36,7 @@ import (
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
+	coordmetrics "github.com/llm-d/llm-d-router/pkg/coordinator/metrics"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
 )
 
@@ -148,17 +150,17 @@ func (s *Step) Execute(ctx context.Context, reqCtx *pipeline.RequestContext) err
 	default:
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", api.ErrCodeInvalidRequest,
 			fmt.Sprintf("unknown %s value", s.cfg.ModeHeader))
-		return pipeline.ErrPipelineDone
+		return responded(http.StatusBadRequest, pipeline.ErrBadRequest)
 	}
 	if reqCtx.Stream && mode != asyncModePassthrough {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", api.ErrCodeInvalidRequest,
 			"stream is only supported in passthrough mode")
-		return pipeline.ErrPipelineDone
+		return responded(http.StatusBadRequest, pipeline.ErrBadRequest)
 	}
 	if reqCtx.Model == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", api.ErrCodeInvalidRequest,
 			"model is required")
-		return pipeline.ErrPipelineDone
+		return responded(http.StatusBadRequest, pipeline.ErrBadRequest)
 	}
 	// The result key joins tenant and id with ":", so a ":" in the tenant
 	// would alias another (tenant, id) pair's key and leak results across
@@ -171,7 +173,7 @@ func (s *Step) Execute(ctx context.Context, reqCtx *pipeline.RequestContext) err
 	if strings.Contains(tenant, ":") {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", api.ErrCodeInvalidRequest,
 			fmt.Sprintf("%s must not contain %q", s.cfg.TenantHeader, ":"))
-		return pipeline.ErrPipelineDone
+		return responded(http.StatusBadRequest, pipeline.ErrBadRequest)
 	}
 
 	if mode == asyncModePassthrough {
@@ -241,9 +243,10 @@ func (s *Step) serveQueued(ctx context.Context, reqCtx *pipeline.RequestContext,
 
 	// A client-chosen id names a logical request, so a re-POST reattaches
 	// to any live copy or stored result instead of enqueueing a duplicate.
-	if reqCtx.OriginalHeaders.Get(reqcommon.RequestIDHeaderKey) != "" &&
-		s.reattachRetry(ctx, reqCtx, mode, tenant, timeout) {
-		return pipeline.ErrPipelineDone
+	if reqCtx.OriginalHeaders.Get(reqcommon.RequestIDHeaderKey) != "" {
+		if err := s.reattachRetry(ctx, reqCtx, mode, tenant, timeout); err != nil {
+			return err
+		}
 	}
 
 	queue, _ := s.cfg.route(reqCtx.Model, tenant)
@@ -263,12 +266,23 @@ func (s *Step) serveQueued(ctx context.Context, reqCtx *pipeline.RequestContext,
 		}
 	}
 
+	// Body is the parsed request as earlier steps left it (render and decode
+	// rewrite it), so it is re-marshalled here rather than taken from
+	// OriginalBody; the producer stores the payload as raw JSON.
+	payload, err := json.Marshal(reqCtx.Body)
+	if err != nil {
+		log.FromContext(ctx).WithName(StepName).Error(err, "failed to encode request body", "id", reqCtx.RequestID)
+		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", api.ErrCodeInvalidRequest,
+			"request body is not encodable as JSON")
+		return responded(http.StatusBadRequest, pipeline.ErrBadRequest)
+	}
 	msg := &api.RedisRequest{
 		RequestMessage: api.RequestMessage{
 			ID:       envelopeID(tenant, reqCtx.RequestID),
 			Created:  now.Unix(),
 			Deadline: now.Add(timeout).Unix(),
-			Payload:  reqCtx.Body,
+			Payload:  payload,
+			Model:    reqCtx.Model,
 			Metadata: metadata,
 			Headers:  fwd,
 			Endpoint: reqCtx.OriginalPath,
@@ -276,19 +290,24 @@ func (s *Step) serveQueued(ctx context.Context, reqCtx *pipeline.RequestContext,
 		RequestQueueName: queue,
 		ResultQueueName:  resultKey(tenant, reqCtx.RequestID),
 	}
-	if err := s.sub.SubmitRequest(ctx, msg); err != nil {
+	call := coordmetrics.StartUpstreamCall(coordmetrics.UpstreamAsyncBroker)
+	err = s.sub.SubmitRequest(ctx, msg)
+	call.Done()
+	if err != nil {
 		log.FromContext(ctx).WithName(StepName).Error(err, "failed to enqueue request", "id", reqCtx.RequestID)
 		writeOpenAIError(w, http.StatusServiceUnavailable, "api_error", "ENQUEUE_FAILED",
 			"failed to enqueue request")
-		return pipeline.ErrPipelineDone
+		if ctx.Err() != nil {
+			return pipeline.ErrPipelineDone
+		}
+		return responded(http.StatusServiceUnavailable, &pipeline.UpstreamError{Step: StepName, StatusCode: 0})
 	}
 
 	if mode == asyncModeEnqueue {
 		writePending(w, reqCtx.RequestID)
 		return pipeline.ErrPipelineDone
 	}
-	s.waitForResult(ctx, reqCtx, tenant, timeout)
-	return pipeline.ErrPipelineDone
+	return s.waitForResult(ctx, reqCtx, tenant, timeout)
 }
 
 // unCancelScript revives a cancelled request that is still queued. The
@@ -309,25 +328,26 @@ return 0
 // cancelled tombstone is cleared so the retry runs fresh. The revive can
 // lose its race with the AP dropping the copy, in which case the tombstone
 // it writes ends the hold with 499 and the next retry lands on the fresh
-// path. Returns true when the response was written here; false sends the
-// caller to the fresh enqueue, which is also the fallback on lookup errors.
-func (s *Step) reattachRetry(ctx context.Context, reqCtx *pipeline.RequestContext, mode asyncMode, tenant string, timeout time.Duration) bool {
+// path. Returns the error that ends the pipeline when the response was
+// written here; nil sends the caller to the fresh enqueue, which is also the
+// fallback on lookup errors.
+func (s *Step) reattachRetry(ctx context.Context, reqCtx *pipeline.RequestContext, mode asyncMode, tenant string, timeout time.Duration) error {
 	logger := log.FromContext(ctx).WithName(StepName)
 	id := reqCtx.RequestID
 	state, res, err := lookupResult(ctx, s.rdb, tenant, id)
 	if err != nil {
 		logger.Error(err, "retry state lookup failed, enqueueing fresh", "id", id)
-		return false
+		return nil
 	}
 	switch state {
 	case asyncStateUnknown:
-		return false
+		return nil
 	case asyncStateReady:
 		if res.StatusCode == 0 && res.ErrorCode == api.ErrCodeCancelled {
 			if err := s.rdb.Del(ctx, resultKey(tenant, id)).Err(); err != nil {
 				logger.Error(err, "failed to clear cancelled result before retry", "id", id)
 			}
-			return false
+			return nil
 		}
 	case asyncStatePending:
 		eid := envelopeID(tenant, id)
@@ -338,13 +358,12 @@ func (s *Step) reattachRetry(ctx context.Context, reqCtx *pipeline.RequestContex
 	}
 	if mode == asyncModeEnqueue {
 		writePending(reqCtx.ResponseWriter, id)
-		return true
+		return pipeline.ErrPipelineDone
 	}
-	s.waitForResult(ctx, reqCtx, tenant, timeout)
-	return true
+	return s.waitForResult(ctx, reqCtx, tenant, timeout)
 }
 
-func (s *Step) waitForResult(ctx context.Context, reqCtx *pipeline.RequestContext, tenant string, timeout time.Duration) {
+func (s *Step) waitForResult(ctx context.Context, reqCtx *pipeline.RequestContext, tenant string, timeout time.Duration) error {
 	logger := log.FromContext(ctx).WithName(StepName)
 	w := reqCtx.ResponseWriter
 	id := reqCtx.RequestID
@@ -395,7 +414,10 @@ func (s *Step) waitForResult(ctx context.Context, reqCtx *pipeline.RequestContex
 			logger.Error(err, "result lookup failed during wait, retrying until the deadline", "id", id)
 		}
 		if err == nil && state == asyncStateReady {
-			if writeResult(w, res) == nil {
+			pipelineResult, writeErr := writeResult(w, res)
+			if writeErr != nil {
+				logger.Error(writeErr, "failed to deliver result, retaining mailbox", "id", id)
+			} else {
 				// Delivery confirmed on the held connection, the result's only
 				// consumer: reclaim the mailbox now instead of letting it sit
 				// out the full result TTL. On write failure the key stays, as
@@ -406,7 +428,7 @@ func (s *Step) waitForResult(ctx context.Context, reqCtx *pipeline.RequestContex
 					logger.Error(err, "failed to delete delivered result", "id", id)
 				}
 			}
-			return
+			return pipelineResult
 		}
 		select {
 		case <-waitCtx.Done():
@@ -422,7 +444,7 @@ func (s *Step) waitForResult(ctx context.Context, reqCtx *pipeline.RequestContex
 				if err := s.sub.CancelRequests(cancelCtx, []string{envelopeID(tenant, id)}); err != nil {
 					logger.Error(err, "failed to cancel abandoned request", "id", id)
 				}
-				return
+				return pipeline.ErrPipelineDone
 			}
 			if holdIsDeadline {
 				// Past the deadline the AP refuses the work at gate, pop,
@@ -435,21 +457,22 @@ func (s *Step) waitForResult(ctx context.Context, reqCtx *pipeline.RequestContex
 					logger.Error(err, "final result lookup failed, answering 504", "id", id)
 				}
 				if err == nil && state == asyncStateReady {
-					if writeResult(w, res) == nil {
-						if err := s.rdb.Del(finalCtx, resultKey(tenant, id)).Err(); err != nil {
-							logger.Error(err, "failed to delete delivered result", "id", id)
-						}
+					pipelineResult, writeErr := writeResult(w, res)
+					if writeErr != nil {
+						logger.Error(writeErr, "failed to deliver result, retaining mailbox", "id", id)
+					} else if err := s.rdb.Del(finalCtx, resultKey(tenant, id)).Err(); err != nil {
+						logger.Error(err, "failed to delete delivered result", "id", id)
 					}
-					return
+					return pipelineResult
 				}
 				writeOpenAIError(w, http.StatusGatewayTimeout, "timeout_error", api.ErrCodeDeadlineExceeded,
 					"request deadline exceeded before a result was produced")
-				return
+				return upstreamFailure(http.StatusGatewayTimeout)
 			}
 			// Cap reached: fall back to the enqueue response, the request
 			// stays queued and fetchable.
 			writePending(w, id)
-			return
+			return pipeline.ErrPipelineDone
 		case <-wake:
 		case <-ticker.C:
 		}

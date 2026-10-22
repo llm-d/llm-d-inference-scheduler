@@ -26,23 +26,13 @@ import (
 	"sort"
 	"strings"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/kvcache/kvblock"
 	"github.com/llm-d/llm-d-router/pkg/kvcache/tokenization"
 	"google.golang.org/protobuf/proto"
 )
 
 const nilStr = "<nil>"
-
-// Modality identifies the type of multimodal content in a prompt.
-type Modality string
-
-// Modality values match the model-server's multimodal hash keys so labels agree
-// across backends.
-const (
-	ModalityImage Modality = "image"
-	ModalityAudio Modality = "audio"
-	ModalityVideo Modality = "video"
-)
 
 // RequestPayload represents a strongly-typed unmarshaled request payload or raw bytes.
 type RequestPayload interface {
@@ -209,6 +199,12 @@ func MaxOutputTokensFromPayload(m PayloadMap, keys ...string) *int64 {
 	return nil
 }
 
+// BytesPerToken is the average number of request bytes per prompt token, used
+// to estimate token counts without a tokenizer. The tokenizer's estimate
+// backend packs this many bytes into each pseudo-token, so its counts agree
+// with byte-based estimates.
+const BytesPerToken = 4
+
 // TokenizedRequest contains the result of tokenizing the request prompt.
 // It is consumed by scheduling and request-control plugins that benefit from
 // actual token data such as prefix-cache awareness.
@@ -254,10 +250,10 @@ func (tp *TokenizedRequest) TokenCount() int {
 
 // MultiModalFeature holds all data needed for prefix-cache scoring of a single
 // multimodal item. Items are ordered by token position within the prompt.
-// Currently only ModalityImage is supported.
+// Currently only reqcommon.ModalityImage is supported.
 type MultiModalFeature struct {
 	// Modality identifies the type of content.
-	Modality Modality
+	Modality reqcommon.Modality
 	// Hash is the content hash of the item, used for KV-cache reuse across requests.
 	Hash string
 	// Offset is the index of the first placeholder token for this item
@@ -607,7 +603,9 @@ func (i *ImagesGenerationsRequest) String() string {
 // This struct includes fields usable for plugins and scheduling decisions.
 type GenerateRequest struct {
 	// TokenIDs are the pre-tokenized input token IDs.
-	TokenIDs []uint32 `json:"token_ids"`
+	TokenIDs []uint32 `json:"token_ids,omitempty"`
+	// Text is the prompt text when pre-tokenized token IDs are not provided.
+	Text string `json:"text,omitempty"`
 	// Features carries multimodal metadata (per-modality content hashes and
 	// placeholder ranges) parsed out of the wire `features` block. Populated
 	// by UnmarshalJSON; not itself a JSON-tagged field.
@@ -829,6 +827,8 @@ type Usage struct {
 }
 
 type PromptTokenDetails struct {
+	// CachedTokens is the prompt-cache read count, counted inside PromptTokens
+	// rather than added to it.
 	CachedTokens int `json:"cached_tokens"`
 }
 
@@ -881,20 +881,24 @@ type AnthropicContent struct {
 	Structured []AnthropicContentBlock
 }
 
+// UnmarshalJSON accepts either a string or an array of content blocks. The first
+// byte selects the format, as in Content.UnmarshalJSON. A malformed block returns
+// its own decode error unwrapped, so nested content does not repeat a prefix.
 func (ac *AnthropicContent) UnmarshalJSON(data []byte) error {
-	var str string
-	if err := json.Unmarshal(data, &str); err == nil {
-		ac.Raw = str
-		return nil
-	}
-
-	var blocks []AnthropicContentBlock
-	if err := json.Unmarshal(data, &blocks); err == nil {
+	if trimmed := bytes.TrimLeft(data, " \t\r\n"); len(trimmed) > 0 && trimmed[0] == '[' {
+		var blocks []AnthropicContentBlock
+		if err := json.Unmarshal(data, &blocks); err != nil {
+			return err
+		}
 		ac.Structured = blocks
 		return nil
 	}
-
-	return errors.New("anthropic content: must be a string or an array of content blocks")
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return errors.New("anthropic content: must be a string or an array of content blocks")
+	}
+	ac.Raw = str
+	return nil
 }
 
 func (ac AnthropicContent) MarshalJSON() ([]byte, error) {
@@ -926,15 +930,22 @@ func (ac AnthropicContent) textLen() int {
 type AnthropicContentBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
-	// image source fields (base64 or URL)
-	Source *AnthropicImageSource `json:"source,omitempty"`
+	// Source keeps raw JSON bytes because its shape depends on Type: an object
+	// for image and document blocks, a URL string for search_result blocks.
+	// Read an image block's source with ImageSource.
+	Source json.RawMessage `json:"source,omitempty"`
 	// tool_use fields (assistant messages): the model's request to call a tool.
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
 	// tool_result fields (user messages): the outcome of a tool_use call.
-	ToolUseID string           `json:"tool_use_id,omitempty"`
-	Content   AnthropicContent `json:"content,omitempty"`
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	// Content keeps raw JSON bytes because its shape depends on Type: a string
+	// or an array of blocks on tool_result and mcp_tool_result, an object on
+	// the server tool results (web_search_tool_result_error,
+	// bash_code_execution_result). Read a tool_result block's content with
+	// ToolResultContent.
+	Content json.RawMessage `json:"content,omitempty"`
 	// thinking field (assistant messages): extended-thinking replay.
 	Thinking string `json:"thinking,omitempty"`
 }
@@ -944,4 +955,34 @@ type AnthropicImageSource struct {
 	MediaType string `json:"media_type,omitempty"`
 	Data      string `json:"data,omitempty"`
 	URL       string `json:"url,omitempty"`
+}
+
+// ImageSource decodes the source of an image block. It returns nil for other
+// block types, and for an image block whose source is absent or is not an
+// image-source object. Each call decodes Source again, which can hold megabytes
+// of base64, so call it once per block rather than inside a loop.
+func (b AnthropicContentBlock) ImageSource() *AnthropicImageSource {
+	if b.Type != "image" {
+		return nil
+	}
+	var src *AnthropicImageSource
+	if err := json.Unmarshal(b.Source, &src); err != nil {
+		return nil
+	}
+	return src
+}
+
+// ToolResultContent decodes the content of a tool_result block, a string or
+// an array of blocks. It returns the zero value for other block types and for
+// a tool_result whose content is absent or does not decode. Each call decodes
+// Content again, so call it once per block.
+func (b AnthropicContentBlock) ToolResultContent() AnthropicContent {
+	if b.Type != reqcommon.BlockTypeToolResult {
+		return AnthropicContent{}
+	}
+	var content AnthropicContent
+	if err := json.Unmarshal(b.Content, &content); err != nil {
+		return AnthropicContent{}
+	}
+	return content
 }

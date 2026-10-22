@@ -230,7 +230,7 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 
 	// Prepare InferenceRequest (needed for both saturation detection and Scheduler)
 	reqCtx.SchedulingRequest = &fwksched.InferenceRequest{
-		RequestID:        reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey],
+		RequestID:        reqCtx.Request.ID,
 		TargetModel:      reqCtx.TargetModelName,
 		Body:             inferenceRequestBody,
 		Headers:          reqCtx.Request.Headers,
@@ -302,6 +302,14 @@ func (d *Director) HandleRequest(ctx context.Context, reqCtx *handlers.RequestCo
 
 	// Run admit request plugins
 	if denyReason := d.runAdmissionPlugins(ctx, reqCtx.SchedulingRequest, snapshotOfCandidatePods); denyReason != nil {
+		// Preserve a typed errcommon.Error from the denying Admitter so the
+		// status code it chose (e.g. ResourceExhausted for a shed) and its
+		// headers (the x-llm-d-request-dropped-reason) reach Envoy intact.
+		// An untyped denial keeps collapsing to Internal, as before.
+		var e errcommon.Error
+		if errors.As(denyReason, &e) {
+			return reqCtx, e
+		}
 		return reqCtx, errcommon.Error{Code: errcommon.Internal, Msg: fmt.Errorf("request cannot be admitted: %w", denyReason).Error()}
 	}
 
@@ -459,10 +467,10 @@ func (d *Director) selectWeightedModel(ctx context.Context, models []v1alpha2.Ta
 
 	if totalWeight == 0 {
 		// If total weight is 0, distribute evenly
-		return models[rand.Intn(len(models))].ModelRewrite
+		return models[rand.Intn(len(models))].ModelRewrite //#nosec G404 -- model traffic split, not security-sensitive
 	}
 
-	randomNum := rand.Intn(int(totalWeight))
+	randomNum := rand.Intn(int(totalWeight)) //#nosec G404 -- model traffic split, not security-sensitive
 	var currentWeight int32
 	for _, model := range models {
 		if model.Weight != nil {
@@ -572,7 +580,7 @@ func (d *Director) HandleResponseHeader(ctx context.Context, reqCtx *handlers.Re
 		return reqCtx
 	}
 	response := &fwkrc.Response{
-		RequestID:   reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey],
+		RequestID:   reqCtx.Request.ID,
 		Headers:     reqCtx.Response.Headers,
 		ReqMetadata: reqCtx.Request.Metadata,
 	}
@@ -604,7 +612,7 @@ func (d *Director) HandleResponseBody(ctx context.Context, reqCtx *handlers.Requ
 	// registered, so this runs before the early return below.
 	if endOfStream && d.requestEvictor != nil {
 		d.requestEvictor.ResponseBody(ctx, reqCtx.SchedulingRequest, &fwkrc.Response{
-			RequestID:        reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey],
+			RequestID:        reqCtx.Request.ID,
 			EndOfStream:      true,
 			TerminationCause: cause,
 		}, reqCtx.TargetPod)
@@ -617,7 +625,7 @@ func (d *Director) HandleResponseBody(ctx context.Context, reqCtx *handlers.Requ
 	startOfStream := !reqCtx.ResponseBodyStarted
 	reqCtx.ResponseBodyStarted = true
 	response := &fwkrc.Response{
-		RequestID:      reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey],
+		RequestID:      reqCtx.Request.ID,
 		Headers:        reqCtx.Response.Headers,
 		StartOfStream:  startOfStream,
 		EndOfStream:    endOfStream,
@@ -649,7 +657,7 @@ func (d *Director) HandleResponseBody(ctx context.Context, reqCtx *handlers.Requ
 			// Built here rather than at function entry: this path is per-chunk, and
 			// deriving a logger allocates whether or not anything is emitted.
 			log.FromContext(ctx).V(logutil.DEBUG).Info("Skipping response body chunk because the async queue is closed",
-				"stage", "bodyChunk", "requestID", reqCtx.Request.Headers[reqcommon.RequestIDHeaderKey])
+				"stage", "bodyChunk", "requestID", reqCtx.Request.ID)
 		}
 	}
 	return reqCtx
@@ -673,7 +681,7 @@ func (d *Director) GetRandomEndpoint() *fwkdl.EndpointMetadata {
 	if len(pods) == 0 {
 		return nil
 	}
-	number := rand.Intn(len(pods))
+	number := rand.Intn(len(pods)) //#nosec G404 -- load spreading across pods, not security-sensitive
 	pod := pods[number]
 	return pod.GetMetadata()
 }

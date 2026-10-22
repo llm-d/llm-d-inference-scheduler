@@ -231,6 +231,36 @@ func TestRenderOnlyBudgetAppliesToRawPayload(t *testing.T) {
 	assert.Equal(t, `[{"role":"user","content":"hi"}]`, string(seen["messages"]))
 }
 
+func TestRenderOnlyBudgetCapsResponsesOutput(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{"caps budget", `{"model":"adapter","input":"hi","max_output_tokens":1020}`, "1"},
+		{"disabled truncation caps budget", `{"model":"adapter","input":"hi","max_output_tokens":1020,"truncation":"disabled"}`, "1"},
+		{"auto truncation keeps budget", `{"model":"adapter","input":"hi","max_output_tokens":1020,"truncation":"auto"}`, "1020"},
+		{"null truncation keeps budget", `{"model":"adapter","input":"hi","max_output_tokens":1020,"truncation":null}`, "1020"},
+		{"leaves budget absent", `{"model":"adapter","input":"hi"}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var seen map[string]json.RawMessage
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, responsesRenderPath, r.URL.Path)
+				assert.NoError(t, json.NewDecoder(r.Body).Decode(&seen))
+				_, _ = w.Write([]byte(`{"token_ids":[1,2,3]}`))
+			}))
+			defer server.Close()
+			renderer, err := newVLLMHTTPRenderer(&vllmConfig{URL: server.URL, PrefillOnly: true})
+			require.NoError(t, err)
+			_, _, err = renderer.RenderResponses(t.Context(), fwkrh.RawPayload(tc.payload))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(seen["max_output_tokens"]))
+			assert.Equal(t, `"hi"`, string(seen["input"]))
+		})
+	}
+}
+
 func TestModelLimitEndpointReplacement(t *testing.T) {
 	p, err := newDiscoveredEndpointPicker(&endpointDiscoveryConfig{DiscoverModelLimits: true})
 	require.NoError(t, err)
@@ -308,4 +338,41 @@ func TestModelLimitEligibility(t *testing.T) {
 		_, err := newDiscoveredEndpointPicker(&cfg)
 		require.Error(t, err)
 	}
+}
+
+func TestOmitMMKwargs(t *testing.T) {
+	for _, tc := range []struct{ name, payload, want string }{
+		{"appends", `{"model":"m","messages":[]}`, `{"model":"m","messages":[],"return_mm_kwargs":false,"mm_payload":"none"}`},
+		{"empty object", `{ }`, `{ "return_mm_kwargs":false,"mm_payload":"none"}`},
+		{"trailing space", "{\"model\":\"m\"}\n", "{\"model\":\"m\",\"return_mm_kwargs\":false,\"mm_payload\":\"none\"}\n"},
+		{"client values lose", `{"return_mm_kwargs":true,"mm_payload":"tensors"}`, `{"return_mm_kwargs":true,"mm_payload":"tensors","return_mm_kwargs":false,"mm_payload":"none"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := omitMMKwargs([]byte(tc.payload))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(out))
+		})
+	}
+	for _, bad := range []string{`[1,2]`, ``, `"x"`} {
+		_, err := omitMMKwargs([]byte(bad))
+		require.Error(t, err, bad)
+	}
+}
+
+func TestOmitMMKwargsAppliesToRawPayload(t *testing.T) {
+	var seen map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&seen))
+		_, _ = w.Write([]byte(`{"token_ids":[1,2,3]}`))
+	}))
+	defer server.Close()
+	renderer, err := newVLLMHTTPRenderer(&vllmConfig{URL: server.URL, PrefillOnly: true, OmitMMKwargs: true})
+	require.NoError(t, err)
+	raw := fwkrh.RawPayload(`{"model":"adapter","messages":[{"role":"user","content":"hi"}],"max_tokens":32000}`)
+	_, _, err = renderer.RenderChat(context.Background(), raw)
+	require.NoError(t, err)
+	assert.Equal(t, "false", string(seen["return_mm_kwargs"]))
+	assert.Equal(t, `"none"`, string(seen["mm_payload"]))
+	assert.Equal(t, "1", string(seen["max_tokens"]))
+	assert.Equal(t, `[{"role":"user","content":"hi"}]`, string(seen["messages"]))
 }

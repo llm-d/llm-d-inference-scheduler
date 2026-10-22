@@ -40,6 +40,12 @@ import (
 func (s *StreamingServer) HandleRequestHeaders(ctx context.Context, reqCtx *RequestContext, req *extProcPb.ProcessingRequest_RequestHeaders) error {
 	reqCtx.RequestReceivedTimestamp = time.Now()
 
+	// Responders run before the EndOfStream fallback so they can intercept bodyless
+	// GETs (e.g. /v1/models) that would otherwise be routed to a random endpoint.
+	if handled, err := s.tryRespondLocally(ctx, reqCtx, req); handled {
+		return err
+	}
+
 	// an EoS in the request headers means this request has no body or trailers.
 	if req.RequestHeaders.EndOfStream {
 		// We will route this request to a random endpoint as this is assumed to just be a GET
@@ -159,10 +165,14 @@ func (s *StreamingServer) generateHeaders(ctx context.Context, reqCtx *RequestCo
 	return headers
 }
 
-// unsetRoutingHeaders lists the routing headers no plugin set, so Envoy removes
-// any client-supplied value before forwarding.
+// unsetRoutingHeaders lists the headers Envoy removes before forwarding: the
+// screening headers, and the routing headers no plugin set, so no
+// client-supplied value reaches the model server.
 func unsetRoutingHeaders(reqCtx *RequestContext) []string {
-	var remove []string
+	remove := make([]string, 0, len(request.ScreeningHeaders)+len(request.InternalRoutingHeaders))
+	for key := range request.ScreeningHeaders {
+		remove = append(remove, key)
+	}
 	for key := range request.InternalRoutingHeaders {
 		if _, ok := reqCtx.Request.Headers[key]; !ok {
 			remove = append(remove, key)

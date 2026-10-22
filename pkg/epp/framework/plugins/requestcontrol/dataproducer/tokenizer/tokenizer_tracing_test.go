@@ -30,6 +30,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-router/pkg/kvcache/kvblock"
@@ -69,8 +70,8 @@ func spanAttrs(span sdktrace.ReadOnlySpan) map[attribute.Key]attribute.Value {
 
 func chatRequest() *scheduling.InferenceRequest {
 	return &scheduling.InferenceRequest{
-		RequestID:   "req-1",
 		TargetModel: "model-a",
+		Headers:     map[string]string{reqcommon.RequestIDHeaderKey: "req-1"},
 		Body: &fwkrh.InferenceRequestBody{
 			ChatCompletions: &fwkrh.ChatCompletionsRequest{
 				Messages: []fwkrh.Message{{Role: "user", Content: fwkrh.Content{Raw: "hi"}}},
@@ -91,7 +92,7 @@ func TestProduce_EmitsTokenizeSpan(t *testing.T) {
 	require.NoError(t, p.Produce(context.Background(), chatRequest(), nil))
 
 	attrs := spanAttrs(tokenizeSpan(t, recorder))
-	assert.Equal(t, backendVLLM, attrs[semconv.LLMDEPPTokenProducerBackendKey].AsString())
+	assert.Equal(t, BackendVLLM, attrs[semconv.LLMDEPPTokenProducerBackendKey].AsString())
 	assert.Equal(t, int64(3), attrs[semconv.LLMDEPPTokenProducerTokenCountKey].AsInt64())
 	assert.Equal(t, "model-a", attrs[semconv.GenAIRequestModelKey].AsString())
 	assert.Equal(t, "req-1", attrs[semconv.GenAIRequestIDKey].AsString())

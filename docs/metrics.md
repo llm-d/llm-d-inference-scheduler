@@ -15,7 +15,7 @@ The router deployment has three metric sources:
 |---|---|---|
 | EPP / router pod | EPP metrics, plugin metrics, and KV-cache metrics | EPP `/metrics`, default port `9090` |
 | Model server / engine pods | vLLM or other engine metrics | Each model server's `/metrics` |
-| P/D sidecar | MoRI-IO metrics only | HTTP `/metrics`, disabled by default |
+| P/D sidecar | Disaggregation request, stage latency, and stage error metrics; MoRI-IO metrics | Sidecar `/metrics` on `--metrics-port`, disabled by default |
 
 The EPP sends HTTP or HTTPS requests directly to each model server endpoint, per the
 `metrics-data-source` plugin's `scheme` parameter (default `http`).
@@ -28,7 +28,7 @@ The tables in this document show complete metric names.
 |---|---|---|
 | EPP / router pod | `llm_d_epp_` | EPP request and latency, in-flight load, pool, scheduler, plugin, data layer, flow control, disaggregation, ext_proc, prefix indexer, multimodal, fairness, predicted latency, model rewrite, and KV-cache metrics. |
 | Model server / engine | Engine-specific | Metrics exposed by the model server implementation. |
-| P/D sidecar | `moriio_dns_` | MoRI-IO peer DNS re-resolution metrics. |
+| P/D sidecar | `llm_d_disagg_sidecar_`, `moriio_dns_` | Disaggregation request, stage latency, and stage error metrics; MoRI-IO peer DNS re-resolution metrics. |
 
 The model server and sidecar metrics use separate registries and prefixes. See [Deprecated series](#deprecated-series)
 for the legacy EPP names that remain available.
@@ -70,15 +70,22 @@ endpoint's `/metrics` path (configurable) and parses the response. The `core-met
 selects configured values and stores them on the endpoint for scorers. These are model server
 metrics, not EPP metrics. The raw engine metrics remain available at the model server endpoint.
 
-### P/D sidecar: MoRI-IO metrics
+### P/D sidecar
 
-The P/D sidecar currently exposes only the `moriio_dns_*` MoRI-IO metrics, and only when
-`--metrics-port` or the backward-compatible `MORIIO_METRICS_ADDR` environment variable is set. The
-endpoint serves plain HTTP unless `--metrics-cert-dir` is set; see
-[MoRI-IO DNS re-resolution](#mori-io-dns-re-resolution) for the enablement and TLS settings.
+The sidecar serves its controller-runtime registry at `/metrics` on a dedicated port, separate from
+the data-plane proxy port, so the model server's own `/metrics` stays reachable through the proxy.
+This registry is separate from the router pod's EPP registry and contains the
+[P/D sidecar request and stage](#pd-sidecar-request-and-stage-metrics) and
+[MoRI-IO DNS re-resolution](#mori-io-dns-re-resolution) metrics.
 
-This endpoint belongs to the sidecar process;
-its controller-runtime registry is separate from the router pod's EPP registry.
+The endpoint is disabled by default. Pass `--metrics-port` (e.g. `--metrics-port=9090`) to the
+sidecar to enable it; `0` (the default) disables it. The `MORIIO_METRICS_ADDR` env var
+(e.g. `:9090`) is a backward-compatible fallback, consulted only when `--metrics-port` is unset.
+
+The endpoint serves plain HTTP by default. Pass `--metrics-cert-dir` with a directory containing
+`tls.crt` and `tls.key` to serve it over TLS instead. Missing or invalid files stop the sidecar; the
+metrics listener does not fall back to HTTP. The metrics TLS setting is independent of
+`--secure-serving` and `--cert-path`, which apply to the sidecar data-plane listener.
 
 ## Metrics catalog
 
@@ -112,16 +119,20 @@ lifecycle handled by the router.
 | `llm_d_epp_request_output_tokens` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Output token count. |
 | `llm_d_epp_request_cached_tokens` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Prompt tokens served from cache. |
 | `llm_d_epp_request_running` | Gauge | `model_name`, `target_model_name`, `fairness_id`, `priority` | Requests currently in flight. |
-| `llm_d_epp_request_ntpot_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Normalized time per output token. |
-| `llm_d_epp_request_ttft_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority`, `streaming` | Time to first token. |
-| `llm_d_epp_request_streaming_tpot_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Time per output token for streaming. |
-| `llm_d_epp_request_streaming_itl_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Inter-token latency for streaming. |
+| `llm_d_epp_request_ntpot_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Normalized time per output token. Carries a trace exemplar; see [Exemplars](#exemplars). |
+| `llm_d_epp_request_ttft_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority`, `streaming` | Time to first token. Carries a trace exemplar; see [Exemplars](#exemplars). |
+| `llm_d_epp_request_streaming_tpot_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Time per output token for streaming. Carries a trace exemplar; see [Exemplars](#exemplars). |
+| `llm_d_epp_request_streaming_itl_seconds` | Histogram | `model_name`, `target_model_name`, `fairness_id`, `priority` | Inter-token latency for streaming. Carries a trace exemplar; see [Exemplars](#exemplars). |
+
+Requests answered locally by a responder, such as `GET /v1/models`, are not counted in
+`llm_d_epp_request_total` or `llm_d_epp_request_size_bytes`. A responder error is counted in
+`llm_d_epp_request_error_total` with empty `model_name` and `target_model_name` labels.
 
 #### Exemplars
 
-`llm_d_epp_request_duration_seconds` attaches the request's trace context to each
-observation as a Prometheus exemplar, so a point on a latency graph can be opened as
-the trace behind it.
+Latency histograms whose notes say they carry a trace exemplar attach the request's
+trace context to each observation as a Prometheus exemplar, so a point on a latency
+graph can be opened as the trace behind it.
 
 | Exemplar label | Present when |
 |---|---|
@@ -143,6 +154,35 @@ Two things are needed to see them:
 Grafana turns the exemplar into a link to the trace when the Prometheus data source has
 an exemplar link configured to a traces backend.
 
+### Tool-calling request integrity
+
+This counter records observed outcomes for supported tool-calling request fields. It does not
+include field values or request content.
+
+Request checks cover Chat Completions (`tools`, `tool_choice`, `parallel_tool_calls`,
+`response_format`), Messages (`tools`, `tool_choice`), and Responses (`tools`, `tool_choice`,
+`parallel_tool_calls`). Provider-prefixed inference endpoints are supported. Render,
+count-token, and response-management subpaths do not emit these request-integrity metrics.
+Responses structured output (`text.format`) is outside these field checks.
+
+| Full metric name | Type | Labels | Notes |
+|---|---|---|---|
+| `llm_d_epp_tool_calling_field_status_total` | Counter | `component`, `direction`, `field`, `status` | Observed request-field preservation, change, drop, or rejection outcomes. |
+
+The `llm_d.tool_calling.present` trace attribute indicates that a supported `tools`,
+`tool_choice`, or `parallel_tool_calls` field was supplied, including empty or null values.
+Chat Completions `response_format` is compared separately for integrity. Requests containing
+only `response_format` report its field status and `present=false`, without tool-choice or
+tool-count attributes.
+
+Request errors unrelated to tool fields, scheduling failures, and failures to read fields
+for telemetry produce no field-status metrics. The trace retains summary metadata, such as tool presence,
+tool-choice mode, and a tool-count bucket, when it can be read from the incoming request.
+EPP reports `rejected` only for a supported field identified by the parser as causing the
+request to fail. This covers invalid JSON types in `tools` for Chat Completions and Messages,
+including typed fields within Messages tool definitions. EPP does not add validation rules
+for fields the parsers accept.
+
 ### Inference pool
 
 These metrics are owned by EPP pool aggregation. They summarize model-server endpoint metrics for
@@ -158,6 +198,15 @@ an `InferencePool`.
 | `llm_d_epp_std_dev_running_requests` | Gauge | `name` (InferencePool name) | Spread of in-flight requests. |
 | `llm_d_epp_ready_endpoints` | Gauge | `name` (InferencePool name) | Ready endpoints in the pool. |
 | `llm_d_epp_per_endpoint_queue_size` | Gauge | `name` (InferencePool name), `model_server_endpoint` | Per-endpoint queue depth. |
+| `llm_d_epp_per_endpoint_nixl_failed_transfers_total` | Counter | `name` (InferencePool name), `model_server_endpoint` | Per-endpoint failed NIXL KV cache transfers. |
+| `llm_d_epp_per_endpoint_nixl_failed_notifications_total` | Counter | `name` (InferencePool name), `model_server_endpoint` | Per-endpoint failed NIXL KV cache notifications. |
+| `llm_d_epp_per_endpoint_nixl_kv_expired_requests_total` | Counter | `name` (InferencePool name), `model_server_endpoint` | Per-endpoint requests whose KV cache expired before it was read. |
+
+The `llm_d_epp_per_endpoint_nixl_*` series expose the counters that the
+[core metrics extractor](../pkg/epp/framework/plugins/datalayer/extractor/metrics/README.md#attributes-produced)
+reads from each endpoint. A series appears once an endpoint reports the counter, and restarts from
+zero when the model server restarts. If an endpoint stops reporting the counter while its pod stays
+Ready, the series keeps its last value.
 
 ### Scheduler
 
@@ -165,7 +214,7 @@ These metrics are owned by EPP scheduler instrumentation.
 
 | Full metric name | Type | Labels | Notes |
 |---|---|---|---|
-| `llm_d_epp_scheduler_e2e_duration_seconds` | Histogram | - | End-to-end scheduling latency. |
+| `llm_d_epp_scheduler_e2e_duration_seconds` | Histogram | - | End-to-end scheduling latency. Carries a trace exemplar; see [Exemplars](#exemplars). |
 | `llm_d_epp_scheduler_attempts_total` | Counter | `status`, `target_model_name`, `endpoint_name`, `namespace`, `port` | Scheduling attempts. |
 
 ### EPP processing overhead
@@ -217,20 +266,61 @@ match data but is not instrumented here. Requests that reach no endpoint are not
 
 | Full metric name | Type | Labels | Notes |
 |---|---|---|---|
-| `llm_d_epp_prefix_predicted_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role` | Prompt tokens predicted to hit the chosen endpoint's prefix cache. |
-| `llm_d_epp_prefix_prompt_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role` | Prompt tokens the prediction was measured against. |
+| `llm_d_epp_prefix_predicted_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role`, `modality` | Prompt tokens predicted to hit the chosen endpoint's prefix cache. |
+| `llm_d_epp_prefix_best_predicted_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role`, `modality` | Highest such prediction among the endpoints the scheduler selected from. |
+| `llm_d_epp_prefix_best_available_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role`, `modality` | Highest such prediction among the request's candidate endpoints before filtering. |
+| `llm_d_epp_prefix_prompt_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role`, `modality` | Prompt tokens the predictions were measured against. |
+| `llm_d_epp_prefix_mm_predicted_cached_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role` | Multimodal prompt tokens predicted to hit the chosen endpoint's prefix cache. |
+| `llm_d_epp_prefix_mm_prompt_tokens` | Histogram | `plugin_name`, `plugin_type`, `endpoint_role` | Multimodal prompt tokens the multimodal prediction was measured against. |
 
 For a request disaggregated into prefill and decode stages, the prediction is recorded for the
 `prefill` profile's endpoint and `endpoint_role` is `prefill`, since the sidecar's default `nixlv2`
 KV connector returns the prefiller's cached-token count. For every other request it is recorded for
 the primary profile's endpoint, and `endpoint_role` is `decode`.
 
-The prefix hit rate the router predicted is `llm_d_epp_prefix_predicted_cached_tokens_sum` divided
-by `llm_d_epp_prefix_prompt_tokens_sum`. Both are observed in one call, so the ratio divides counts
-taken over the same requests. The rate the model server delivered is a separate ratio,
-`llm_d_epp_request_cached_tokens_sum` divided by `llm_d_epp_request_input_tokens_sum`.
+The `modality` label holds the modalities the request carries as a comma-joined sorted list (`none`
+for text-only), the same value as the `mm.modality` span attribute. Each request is observed once,
+so summing over `modality` keeps the all-requests ratio exact. Per-modality breakdowns filter the
+label, e.g. `modality=~".*image.*"` covers requests carrying an image.
 
-Comparing the two ratios is what the prediction metrics are for, subject to three limits.
+The modality split applies to the predicted rate only. The delivered pair, `llm_d_epp_request_cached_tokens`
+divided by `llm_d_epp_request_input_tokens`, carries no modality label, so a per-modality predicted
+rate has no delivered counterpart to compare against.
+
+For the `approx-prefix-cache-producer`, the modality series describes the request mix, not
+multimodal hash correlation: that producer hashes token IDs, so on the vLLM render backend two
+requests with different images but the same placeholder tokens still match fully and its image
+series reads high for that reason. The `estimate` backend hashes the asset content into its
+multimodal placeholder tokens, so different images produce different tokens and do not match.
+
+The mm pair covers only requests whose match info carries multimodal attribution, so text-only
+requests never enter it and a zero observation means a multimodal request matched no blocks. Only
+the `precise-prefix-cache-producer` records it: the approximate producer's match is not
+multimodal-tainted. The predicted count sums each feature's tokens inside the matched prefix, so a
+feature that starts or ends mid-block contributes only the tokens it holds. Dividing
+`llm_d_epp_prefix_mm_predicted_cached_tokens_sum` by `llm_d_epp_prefix_mm_prompt_tokens_sum` gives
+the share of the request's multimodal tokens the routing decision served from cache; the
+prompt-level pair mixes text and multimodal tokens, so it cannot report that share. The pair
+carries no modality label: its predicted count aggregates every modality the request carries.
+
+The prefix hit rate the router predicted is `llm_d_epp_prefix_predicted_cached_tokens_sum` divided
+by `llm_d_epp_prefix_prompt_tokens_sum`. All four metrics are observed in one call, so any ratio
+among them divides counts taken over the same requests. The rate the model server delivered is a
+separate ratio, `llm_d_epp_request_cached_tokens_sum` divided by
+`llm_d_epp_request_input_tokens_sum`.
+
+The two maxima locate a shortfall in the prediction. Their endpoint sets narrow into each other:
+every candidate the request could have reached, those that survived the scheduler's filters and
+reached the picker, and the one the picker chose. Dividing
+`llm_d_epp_prefix_predicted_cached_tokens_sum` by `llm_d_epp_prefix_best_predicted_cached_tokens_sum`
+gives the share of the reachable reuse the routing decision captured, which is a scoring and picking
+question. Dividing `llm_d_epp_prefix_best_predicted_cached_tokens_sum` by
+`llm_d_epp_prefix_best_available_cached_tokens_sum` gives the share that survived filtering, which a
+filter may be right to reduce when it is shedding load away from a saturated endpoint holding the
+prefix. A profile that reports no scored candidates leaves only the chosen endpoint to go on, so both
+maxima fall back to the prediction for it and the ratios read as 1.
+
+Comparing these ratios is what the prediction metrics are for, subject to the limits below.
 
 The request cohorts differ. A prediction is recorded before the request is forwarded, while the
 request token metrics come from the model server's response, so a request that fails or returns no
@@ -242,13 +332,22 @@ The `prefill` attribution matches only the `nixlv2` KV connector. The `shared-st
 request `llm_d_epp_request_cached_tokens` carries the decode pod's count while the prediction
 describes the prefill pod. Under those connectors the gap between the ratios is not index accuracy.
 
+The two maxima are scoped differently from each other for a disaggregated request.
+`llm_d_epp_prefix_best_predicted_cached_tokens` covers the `prefill` profile's scored candidates,
+while `llm_d_epp_prefix_best_available_cached_tokens` is taken before the role filters run and so
+spans prefill and decode pods together. A decode pod holding the prefix raises the available maximum
+while being unreachable by the prefill decision. Read the ratio between the two maxima as a filtering
+signal only where prefill and decode are served by the same pods. The decode profile's routing
+decision is not measured for a disaggregated request.
+
 Token units follow the tokenizer backend. The vLLM render backend counts the same tokens the model
 server reports, and the two ratios are directly comparable. The `estimate` backend, which is the
 zero-config default, packs bytes into four-byte pseudo-tokens: the predicted rate stays
 self-consistent, but CJK, code, and chat-template-heavy inputs shift it against the server's figure.
 
-`llm_d_epp_kv_cache_index_lookup_hits_total` answers a different question: it counts the best
-candidate rather than the chosen one, which bounds the reuse available to any routing decision.
+`llm_d_epp_kv_cache_index_lookup_hits_total` also reports a best candidate, but not on terms that
+compare with these metrics: it counts blocks rather than tokens, only the precise producer feeds it,
+and it accumulates once per prompt rather than once per request.
 
 ### Token producer render
 
@@ -319,6 +418,7 @@ only when that plugin is configured and records the related prediction, observat
 | `llm_d_epp_request_predicted_tpot_seconds` | Histogram | `plugin_name`, `plugin_type`, `model_name`, `target_model_name` | Predicted time per output token. |
 | `llm_d_epp_request_tpot_prediction_duration_seconds` | Histogram | `plugin_name`, `plugin_type`, `model_name`, `target_model_name` | Time spent computing the TPOT prediction. |
 | `llm_d_epp_request_slo_violation_total` | Counter | `plugin_name`, `plugin_type`, `model_name`, `target_model_name`, `type` | SLO violations. |
+| `llm_d_epp_request_prediction_failures_total` | Counter | `plugin_name`, `plugin_type`, `reason` | Failed latency prediction attempts (`request_error`, `nil_response`, `length_mismatch`, `predictor_unavailable`). |
 
 ### Disaggregation
 
@@ -388,7 +488,7 @@ These metrics are owned by the EPP Flow Control layer.
 
 | Full metric name | Type | Labels | Notes |
 |---|---|---|---|
-| `llm_d_epp_flow_control_request_queue_duration_seconds` | Histogram | `fairness_id`, `priority`, `outcome`, `inference_pool`, `model_name`, `target_model_name` | Time from queue entry to terminal outcome. |
+| `llm_d_epp_flow_control_request_queue_duration_seconds` | Histogram | `fairness_id`, `priority`, `outcome`, `inference_pool`, `model_name`, `target_model_name` | Time from queue entry to terminal outcome. Carries a trace exemplar; see [Exemplars](#exemplars). |
 | `llm_d_epp_flow_control_dispatch_cycle_duration_seconds` | Histogram | - | Cost of one dispatch cycle. |
 | `llm_d_epp_flow_control_request_enqueue_duration_seconds` | Histogram | `fairness_id`, `priority`, `outcome` | Time spent admitting a request to the queue. |
 | `llm_d_epp_flow_control_queue_size` | Gauge | `fairness_id`, `priority`, `inference_pool`, `model_name`, `target_model_name` | Requests currently held in the queue. |
@@ -651,25 +751,26 @@ use the labels shown below.
 | `llm_d_epp_kv_cache_events_pool_queue_depth` | Gauge | - | Messages queued across event-pool workers. |
 | `llm_d_epp_kv_cache_events_pool_capacity` | Gauge | - | Event-pool worker capacity. |
 
+### P/D sidecar request and stage metrics
+
+Emitted by the sidecar proxy on its `/metrics` endpoint; see [P/D sidecar](#pd-sidecar) for
+enablement and TLS.
+
+| Full metric name | Type | Labels | Notes |
+|---|---|---|---|
+| `llm_d_disagg_sidecar_requests_total` | Counter | `api_type` | Requests on the intercepted inference API paths. `api_type` is `chat_completions`, `completions`, `messages`, `responses`, `vllm_generate`, or `sglang_generate`. |
+| `llm_d_disagg_sidecar_disagg_requests_total` | Counter | `disagg_type` | Requests routed through disaggregation. `disagg_type` is `prefill-decode`, `encode-decode`, or `encode-prefill-decode`. |
+| `llm_d_disagg_sidecar_encode_duration_seconds` | Histogram | - | Encode stage latency. |
+| `llm_d_disagg_sidecar_prefill_duration_seconds` | Histogram | - | Prefill stage latency. |
+| `llm_d_disagg_sidecar_decode_duration_seconds` | Histogram | - | Decode stage latency. Not sampled when prefill returns an error status, since decode is then not run or its output is discarded. |
+| `llm_d_disagg_sidecar_request_errors_total` | Counter | `stage` | Stage errors. `stage` is `encode`, `prefill`, or `decode`. |
+
 ### MoRI-IO DNS re-resolution
 
 Emitted by the sidecar proxy when MoRI-IO peer host specs are DNS names that are re-resolved on the
 request path (see the
-[MoRI-IO feature guide](../pkg/sidecar/proxy/MORIIO_README.md)). The collectors are registered on
-the sidecar process's controller-runtime registry. That registry is separate from the router pod's
-EPP registry. These metrics are unlabeled.
-
-Unlike the EPP `/metrics` endpoint, the sidecar does not serve metrics by
-default. Pass `--metrics-port` (e.g. `--metrics-port=9090`) to the sidecar to
-expose these counters at `/metrics` on that port; `0` (the default) disables it.
-The `MORIIO_METRICS_ADDR` env var (e.g. `:9090`) is a backward-compatible
-fallback, consulted only when `--metrics-port` is unset.
-
-The endpoint serves plain HTTP by default. Pass `--metrics-cert-dir` with a
-directory containing `tls.crt` and `tls.key` to serve it over TLS instead.
-Missing or invalid files stop the sidecar; the metrics listener does not fall
-back to HTTP. The metrics TLS setting is independent of `--secure-serving` and
-`--cert-path`, which apply to the sidecar data-plane listener.
+[MoRI-IO feature guide](../pkg/sidecar/proxy/MORIIO_README.md)). These metrics are unlabeled and are
+served on the sidecar `/metrics` endpoint; see [P/D sidecar](#pd-sidecar) for enablement and TLS.
 
 | Full metric name | Type | Labels | Notes |
 |---|---|---|---|

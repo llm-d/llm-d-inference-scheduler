@@ -158,7 +158,7 @@ func (p *OpenAIParser) ParseRequest(ctx context.Context, body []byte, headers ma
 	}
 	extractedBody.MaxOutputTokens = maxOutputTokensForAPI(apiType, bodyMap)
 	extractedBody.Stream = isStreamingRequest(apiType, bodyMap)
-	return &fwkrh.ParseResult{Body: extractedBody, SkipResponseProcessing: false}, nil
+	return &fwkrh.ParseResult{Body: extractedBody, JSONValidated: true, SkipResponseProcessing: false}, nil
 }
 
 func isStreamingRequest(apiType string, bodyMap map[string]any) bool {
@@ -269,7 +269,7 @@ func isStreamTerminator(content []byte) bool {
 }
 
 func responseMediaType(headers map[string]string) string {
-	value, ok := headerValue(headers, request.HeaderContentType)
+	value, ok := headerValue(headers, reqcommon.HeaderContentType)
 	if !ok {
 		return ""
 	}
@@ -440,7 +440,7 @@ func extractRequestBody(apiType string, rawBody []byte) (*fwkrh.InferenceRequest
 
 // parseImagesEditsRequest parses a multipart/form-data /v1/images/edits request.
 func parseImagesEditsRequest(body []byte, headers map[string]string) (*fwkrh.ParseResult, error) {
-	contentTypeValue, _ := headerValue(headers, request.HeaderContentType)
+	contentTypeValue, _ := headerValue(headers, reqcommon.HeaderContentType)
 	mediaType, params, err := mime.ParseMediaType(contentTypeValue)
 	if err != nil || mediaType != "multipart/form-data" {
 		return nil, errors.New("images edits request must have a multipart/form-data content-type")
@@ -508,6 +508,10 @@ func requestBodyDecodeError(err, validationErr error) error {
 	var syntaxErr *json.SyntaxError
 	if errors.As(err, &syntaxErr) {
 		return err
+	}
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) && typeErr.Field != "" {
+		return &fwkrh.RequestFieldError{Field: typeErr.Field, Err: validationErr}
 	}
 	return validationErr
 }

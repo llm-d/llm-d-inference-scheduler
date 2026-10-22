@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-router/pkg/epp/metadata"
@@ -48,9 +49,9 @@ func hashTokens(t []uint32) uint64 {
 // hashing, so the scorer's cache keys are unchanged.
 func TestPackBytes_KeyPreserving(t *testing.T) {
 	raw := []byte("the quick brown fox jumps over!!") // len 32, 4-byte aligned
-	require.Zero(t, len(raw)%bytesPerToken, "fixture must be %d-byte aligned, got len %d", bytesPerToken, len(raw))
+	require.Zero(t, len(raw)%fwkrh.BytesPerToken, "fixture must be %d-byte aligned, got len %d", fwkrh.BytesPerToken, len(raw))
 	tokens := packBytes(raw)
-	require.Len(t, tokens, len(raw)/bytesPerToken)
+	require.Len(t, tokens, len(raw)/fwkrh.BytesPerToken)
 	assert.Equal(t, xxhash.Sum64(raw), hashTokens(tokens), "packed-token hash != raw-byte hash; estimate path is not key-preserving")
 }
 
@@ -63,6 +64,18 @@ func TestEstimateBackend_GeneratePassthrough(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, in, tp.Prompts[0].TokenIDs)
+}
+
+// TestEstimateBackend_GenerateTextEstimatesPseudoTokens asserts text generate
+// input is byte-estimated into pseudo-tokens.
+func TestEstimateBackend_GenerateTextEstimatesPseudoTokens(t *testing.T) {
+	prompt := "hello world"
+	tp, err := estimateBackend{}.produce(context.Background(), &fwkrh.InferenceRequestBody{
+		Generate: &fwkrh.GenerateRequest{Text: prompt},
+	})
+	require.NoError(t, err)
+	require.Len(t, tp.Prompts, 1)
+	assert.Equal(t, packBytes([]byte(prompt)), tp.Prompts[0].TokenIDs)
 }
 
 // TestEstimateBackend_CompletionsTokenIDsPassthrough asserts token-ID completions
@@ -156,7 +169,7 @@ func TestEstimateBackend_ChatImageFeature(t *testing.T) {
 	require.Len(t, tp.Prompts, 1)
 	require.Len(t, tp.Prompts[0].MultiModalFeatures, 1)
 	f := tp.Prompts[0].MultiModalFeatures[0]
-	assert.Equal(t, fwkrh.ModalityImage, f.Modality)
+	assert.Equal(t, reqcommon.ModalityImage, f.Modality)
 	assert.Equal(t, strconv.FormatUint(xxhash.Sum64String(pngBase64DataURL), 16), f.Hash)
 	assert.Greater(t, f.Length, 1, "image length must be > 1 (placeholder weighting)")
 	assert.GreaterOrEqual(t, f.Offset, 0)
@@ -188,7 +201,7 @@ func TestEstimateBackend_ResponsesImageFeature(t *testing.T) {
 	require.Len(t, tp.Prompts, 1)
 	require.Len(t, tp.Prompts[0].MultiModalFeatures, 1)
 	f := tp.Prompts[0].MultiModalFeatures[0]
-	assert.Equal(t, fwkrh.ModalityImage, f.Modality)
+	assert.Equal(t, reqcommon.ModalityImage, f.Modality)
 	assert.Equal(t, strconv.FormatUint(xxhash.Sum64String(pngBase64DataURL), 16), f.Hash)
 }
 
@@ -275,11 +288,11 @@ func TestEstimateBackend_ChatModalityLabels(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		block fwkrh.ContentBlock
-		want  fwkrh.Modality
+		want  reqcommon.Modality
 	}{
-		{"image", fwkrh.ContentBlock{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "https://example.com/a.png"}}, fwkrh.ModalityImage},
-		{"audio", fwkrh.ContentBlock{Type: "input_audio", InputAudio: fwkrh.AudioBlock{Data: "AAAA", Format: "wav"}}, fwkrh.ModalityAudio},
-		{"video", fwkrh.ContentBlock{Type: "video_url", VideoURL: fwkrh.VideoBlock{URL: "https://example.com/clip.mp4"}}, fwkrh.ModalityVideo},
+		{"image", fwkrh.ContentBlock{Type: "image_url", ImageURL: fwkrh.ImageBlock{URL: "https://example.com/a.png"}}, reqcommon.ModalityImage},
+		{"audio", fwkrh.ContentBlock{Type: "input_audio", InputAudio: fwkrh.AudioBlock{Data: "AAAA", Format: "wav"}}, reqcommon.ModalityAudio},
+		{"video", fwkrh.ContentBlock{Type: "video_url", VideoURL: fwkrh.VideoBlock{URL: "https://example.com/clip.mp4"}}, reqcommon.ModalityVideo},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tp, err := estimateBackend{}.produce(context.Background(), chat(tc.block))
@@ -667,7 +680,7 @@ func TestEstimateBackend_ChatAudioFeature(t *testing.T) {
 	require.Len(t, tp.Prompts, 1)
 	require.Len(t, tp.Prompts[0].MultiModalFeatures, 1)
 	f := tp.Prompts[0].MultiModalFeatures[0]
-	assert.Equal(t, fwkrh.ModalityAudio, f.Modality)
+	assert.Equal(t, reqcommon.ModalityAudio, f.Modality)
 	assert.Equal(t, strconv.FormatUint(xxhash.Sum64String(url), 16), f.Hash)
 	assert.Greater(t, f.Length, 1, "audio length must be > 1 (placeholder weighting)")
 	assert.GreaterOrEqual(t, f.Offset, 0)
@@ -994,9 +1007,9 @@ func TestEstimateBackend_MessagesImageFeature(t *testing.T) {
 				Role: "user",
 				Content: fwkrh.AnthropicContent{Structured: []fwkrh.AnthropicContentBlock{
 					{Type: "text", Text: "describe this"},
-					{Type: "image", Source: &fwkrh.AnthropicImageSource{
+					{Type: "image", Source: imageSource(fwkrh.AnthropicImageSource{
 						Type: "base64", MediaType: "image/png", Data: pngBase64Raw,
-					}},
+					})},
 				}},
 			}},
 		},
@@ -1006,7 +1019,7 @@ func TestEstimateBackend_MessagesImageFeature(t *testing.T) {
 	require.Len(t, tp.Prompts, 1)
 	require.Len(t, tp.Prompts[0].MultiModalFeatures, 1)
 	f := tp.Prompts[0].MultiModalFeatures[0]
-	assert.Equal(t, fwkrh.ModalityImage, f.Modality)
+	assert.Equal(t, reqcommon.ModalityImage, f.Modality)
 	assert.Equal(t, strconv.FormatUint(xxhash.Sum64String(pngBase64Raw), 16), f.Hash, "base64 source must hash by its raw payload")
 	assert.Greater(t, f.Length, 1, "image length must be > 1 (placeholder weighting)")
 	assert.GreaterOrEqual(t, f.Offset, 0)
@@ -1022,7 +1035,7 @@ func TestEstimateBackend_MessagesURLImageKey(t *testing.T) {
 			Messages: []fwkrh.AnthropicMessage{{
 				Role: "user",
 				Content: fwkrh.AnthropicContent{Structured: []fwkrh.AnthropicContentBlock{
-					{Type: "image", Source: &fwkrh.AnthropicImageSource{Type: "url", URL: url}},
+					{Type: "image", Source: imageSource(fwkrh.AnthropicImageSource{Type: "url", URL: url})},
 				}},
 			}},
 		},
@@ -1065,7 +1078,7 @@ func TestEstimateBackend_ChatToolsBeforeSystem(t *testing.T) {
 	toolsJSON, err := json.Marshal(tools)
 	require.NoError(t, err)
 	// -1 skips the token straddling the tools/system byte boundary.
-	sharedTokens := len(toolsJSON)/bytesPerToken - 1
+	sharedTokens := len(toolsJSON)/fwkrh.BytesPerToken - 1
 	chat := func(systemContent string) *fwkrh.InferenceRequestBody {
 		return &fwkrh.InferenceRequestBody{ChatCompletions: &fwkrh.ChatCompletionsRequest{
 			Messages: []fwkrh.Message{
@@ -1096,7 +1109,7 @@ func TestEstimateBackend_MessagesToolsBeforeSystem(t *testing.T) {
 	toolsJSON, err := json.Marshal(tools)
 	require.NoError(t, err)
 	// -1 skips the token straddling the tools/system byte boundary.
-	sharedTokens := len(toolsJSON)/bytesPerToken - 1
+	sharedTokens := len(toolsJSON)/fwkrh.BytesPerToken - 1
 	build := func(systemContent string) *fwkrh.InferenceRequestBody {
 		return &fwkrh.InferenceRequestBody{Messages: &fwkrh.MessagesRequest{
 			System: fwkrh.AnthropicContent{Raw: systemContent},
@@ -1248,10 +1261,47 @@ func TestEstimateBackend_MessagesToolBlocksAffectPrefix(t *testing.T) {
 
 	toolResult := build([]fwkrh.AnthropicContentBlock{{
 		Type: "tool_result", ToolUseID: "toolu_01",
-		Content: fwkrh.AnthropicContent{Raw: "Sunny, 22C"},
+		Content: json.RawMessage(`"Sunny, 22C"`),
 	}})
 	toolResultOut, err := estimateBackend{}.produce(context.Background(), toolResult)
 	require.NoError(t, err)
 	assert.NotEqual(t, hashTokens(baseOut.Prompts[0].TokenIDs), hashTokens(toolResultOut.Prompts[0].TokenIDs),
 		"tool_result content was ignored by the prefix estimator")
+}
+
+// chatEstimate decodes a /v1/chat/completions body the way the parser does and
+// runs the estimate backend on it.
+func chatEstimate(t *testing.T, raw string) []uint32 {
+	t.Helper()
+	var chat fwkrh.ChatCompletionsRequest
+	require.NoError(t, json.Unmarshal([]byte(raw), &chat))
+	tp, err := estimateBackend{}.produce(context.Background(), &fwkrh.InferenceRequestBody{ChatCompletions: &chat})
+	require.NoError(t, err)
+	require.Len(t, tp.Prompts, 1)
+	return tp.Prompts[0].TokenIDs
+}
+
+// TestEstimateBackend_ChatToolCallsAffectPrefix asserts assistant tool_calls
+// participate in the prefix stream, as tool_use blocks do for /v1/messages and
+// function_call items do for /v1/responses.
+func TestEstimateBackend_ChatToolCallsAffectPrefix(t *testing.T) {
+	turn := func(name, args string) string {
+		call, err := json.Marshal(map[string]any{
+			"id": "call_1", "type": "function",
+			"function": map[string]any{"name": name, "arguments": args},
+		})
+		require.NoError(t, err)
+		return `{"messages":[{"role":"user","content":"run"},{"role":"assistant","content":null,"tool_calls":[` + string(call) + `]}]}`
+	}
+	noCall := chatEstimate(t, `{"messages":[{"role":"user","content":"run"},{"role":"assistant","content":null}]}`)
+	zurich := chatEstimate(t, turn("get_weather", `{"city":"Zurich"}`))
+	paris := chatEstimate(t, turn("get_weather", `{"city":"Paris"}`))
+	other := chatEstimate(t, turn("get_time", `{"city":"Zurich"}`))
+
+	assert.NotEqual(t, hashTokens(noCall), hashTokens(zurich), "tool_calls were ignored by the prefix estimator")
+	assert.NotEqual(t, hashTokens(zurich), hashTokens(paris), "tool call arguments were ignored by the prefix estimator")
+	assert.NotEqual(t, hashTokens(zurich), hashTokens(other), "tool call name was ignored by the prefix estimator")
+
+	long := chatEstimate(t, turn("write_file", strings.Repeat("x", 4000)))
+	assert.Greater(t, len(long), len(noCall)+900, "tool call arguments must count toward the estimate")
 }
