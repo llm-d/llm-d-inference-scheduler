@@ -100,7 +100,8 @@ func newDecodeProxyRequest(ctx context.Context, logger logr.Logger, step string,
 // (connection refused, timeout, TCP reset) after the ErrorHandler has already
 // answered 502. Both fields let the caller emit error metrics without another
 // write to the client, which is already committed by the proxy. Cancelled
-// carries cancellation from the client or an upstream dependency.
+// carries the request context's error when the round trip failed because the
+// client's request ended.
 type decodeOutcome struct {
 	Status       int
 	TransportErr error
@@ -143,12 +144,16 @@ func newDecodeProxy(logger logr.Logger, transport http.RoundTripper, modifyRespo
 			if errors.Is(proxyErr, errCacheMiss) {
 				return
 			}
-			// serveDecode distinguishes client cancellation from dependency failure.
-			// Check the context: a transport header timeout also matches
-			// context.DeadlineExceeded while the request is still active.
-			if cause := context.Cause(req.Context()); cause != nil {
-				out.Cancelled = cause
-				logger.V(logutil.VERBOSE).Info("decode proxy: request cancelled", "error", cause)
+			// A request whose context already ended (client disconnected, or a
+			// client-set deadline expired) is a routine lifecycle event, not a
+			// backend fault. Check req.Context().Err() rather than proxyErr's
+			// identity: Transport.RoundTrip's ResponseHeaderTimeout returns
+			// net/http's errTimeout, which satisfies
+			// errors.Is(err, context.DeadlineExceeded) by stdlib design and
+			// would otherwise misclassify a hung backend as a client cancellation.
+			if ctxErr := req.Context().Err(); ctxErr != nil {
+				out.Cancelled = ctxErr
+				logger.V(logutil.VERBOSE).Info("decode proxy: client cancelled", "error", proxyErr)
 				return
 			}
 			out.TransportErr = proxyErr
@@ -161,29 +166,25 @@ func newDecodeProxy(logger logr.Logger, transport http.RoundTripper, modifyRespo
 
 // serveDecode wraps transport with instrumentedTransport itself, so callers
 // pass the raw transport. Passing an already instrumented one counts the call
-// twice in upstream_request_total. ctx is the client context; proxyReq may use a
-// child context cancelled by a prefill failure.
-func serveDecode(ctx context.Context, logger logr.Logger, transport http.RoundTripper, w http.ResponseWriter, proxyReq *http.Request,
+// twice in upstream_request_total.
+func serveDecode(logger logr.Logger, transport http.RoundTripper, w http.ResponseWriter, proxyReq *http.Request,
 	upstream string, modifyResponse func(*http.Response) error) (out *decodeOutcome) {
 	var proxy *httputil.ReverseProxy
 	proxy, out = newDecodeProxy(logger, instrumentedTransport(transport, upstream), modifyResponse)
 	defer func() {
 		r := recover()
-		if r != nil {
-			// A dependency failure must abort the stream while the client is connected.
-			if r != http.ErrAbortHandler || ctx.Err() == nil {
-				panic(r)
-			}
-			logger.V(logutil.VERBOSE).Info("decode proxy: client left mid-stream", "status", out.Status)
+		if r == nil {
+			return
 		}
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			out.Cancelled = ctxErr
-		} else if cause := context.Cause(proxyReq.Context()); cause != nil {
-			if out.Status != 0 {
-				panic(http.ErrAbortHandler)
-			}
-			out.Cancelled = cause
+		// The proxy aborts with http.ErrAbortHandler when the body copy fails.
+		// After the client's request context ended that is the client departing:
+		// out already holds the worker's answer, so return it instead of
+		// propagating the abort. With the client present the abort propagates and
+		// the connection closes on the truncated body.
+		if r != http.ErrAbortHandler || proxyReq.Context().Err() == nil {
+			panic(r)
 		}
+		logger.V(logutil.VERBOSE).Info("decode proxy: client left mid-stream", "status", out.Status)
 	}()
 	proxy.ServeHTTP(w, proxyReq)
 	return out
