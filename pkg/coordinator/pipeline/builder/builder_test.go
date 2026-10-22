@@ -40,7 +40,6 @@ func TestValidatePipeline(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "sglang pd is terminal", cfg: config.PipelineConfig{UseOpenAIFormat: true, Steps: []config.StepConfig{sglangPD, decode}}, wantErr: true},
-		{name: "sglang pd alone", cfg: config.PipelineConfig{UseOpenAIFormat: true, Steps: []config.StepConfig{sglangPD}}},
 		{
 			name:    "openai format needs no render",
 			cfg:     config.PipelineConfig{UseOpenAIFormat: true, Steps: []config.StepConfig{decode}},
@@ -143,29 +142,25 @@ func TestBuildRejectsInvalidForwardResponseHeaders(t *testing.T) {
 func TestBuildSGLangPDConfiguration(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
-		params    string
+		params    map[string]any
 		wantError string
 	}{
 		{name: "pipeline connector defaults do not apply"},
-		{name: "grace period", params: "        prefill_grace: 5s\n"},
-		{name: "explicit kv connector rejected", params: "        kv_connector: kv-sglang\n", wantError: "kv_connector"},
-		{name: "explicit ec connector rejected", params: "        ec_connector: ec-nixl\n", wantError: "ec_connector"},
-		{name: "separate bootstrap port rejected", params: "        bootstrap_port: 8000\n", wantError: "bootstrap_port"},
+		{name: "grace period", params: map[string]any{"prefill_grace": "5s"}},
+		{name: "explicit kv connector rejected", params: map[string]any{steps.ParamKVConnector: "kv-sglang"}, wantError: "kv_connector"},
+		{name: "explicit ec connector rejected", params: map[string]any{steps.ParamECConnector: "ec-nixl"}, wantError: "ec_connector"},
+		{name: "separate bootstrap port rejected", params: map[string]any{"bootstrap_port": 8000}, wantError: "bootstrap_port"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body := "pipeline:\n  kv_connector: kv-nixl\n  ec_connector: ec-nixl\n  steps:\n    - type: sglang-pd\n"
-			if tc.params != "" {
-				body += "      params:\n" + tc.params
-			}
-			path := filepath.Join(t.TempDir(), "coordinator.yaml")
-			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			cfg, err := config.Load(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = Build(cfg, gateway.New(config.GatewayConfig{}))
+			cfg := &config.Config{Pipeline: config.PipelineConfig{
+				UseOpenAIFormat: true,
+				KVConnector:     "kv-nixl",
+				ECConnector:     "ec-nixl",
+				Steps: []config.StepConfig{
+					{Type: steps.SGLangPDStepName, Params: tc.params},
+				},
+			}}
+			_, err := Build(cfg, gateway.New(config.GatewayConfig{}))
 			if tc.wantError == "" {
 				if err != nil {
 					t.Fatalf("Build() unexpected error: %v", err)

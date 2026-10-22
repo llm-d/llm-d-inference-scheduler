@@ -230,7 +230,7 @@ func TestSGLangPDPrefillFailureAbortsStreamingClient(t *testing.T) {
 	failPrefill := make(chan struct{})
 	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
-		w.Header().Set("Content-Type", reqcommon.ContentTypeEventStream)
+		w.Header().Set("Content-Type", reqcommon.MediaTypeEventStream)
 		if r.Header.Get(reqcommon.EPPProfileHeaderKey) == gateway.PhasePrefill {
 			w.Header().Set(routing.PrefillEndpointHeader, "10.0.0.7:8000")
 			w.(http.Flusher).Flush()

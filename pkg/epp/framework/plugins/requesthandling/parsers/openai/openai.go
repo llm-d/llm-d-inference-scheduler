@@ -229,7 +229,7 @@ func (p *OpenAIParser) ParseResponse(ctx context.Context, body []byte, headers m
 		// may emit a trailing empty body with the EndOfStream flag set to true.
 		return nil, nil //nolint:nilnil
 	}
-	if mediaType == reqcommon.ContentTypeEventStream {
+	if mediaType == reqcommon.MediaTypeEventStream {
 		return p.parseStreamResponse(body)
 	}
 

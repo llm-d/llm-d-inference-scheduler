@@ -35,9 +35,8 @@ import (
 // prefill pods. A value that is not a valid integer is rejected in favor of the
 // default and logged, so the fallback is observable.
 const (
-	envSGLangBootstrapPort = "SGLANG_BOOTSTRAP_PORT"
-	// DefaultSGLangBootstrapPort is SGLang's bootstrap service port.
-	DefaultSGLangBootstrapPort = 8998
+	envSGLangBootstrapPort     = "SGLANG_BOOTSTRAP_PORT"
+	defaultSGLangBootstrapPort = 8998
 )
 
 var (
@@ -51,11 +50,11 @@ var (
 // default is returned.
 func parseSGLangBootstrapPort(raw string) (port int, rejected bool) {
 	if raw == "" {
-		return DefaultSGLangBootstrapPort, false
+		return defaultSGLangBootstrapPort, false
 	}
 	p, err := strconv.Atoi(raw)
 	if err != nil || p < 1 || p > 65535 {
-		return DefaultSGLangBootstrapPort, true
+		return defaultSGLangBootstrapPort, true
 	}
 	return p, false
 }
@@ -69,7 +68,7 @@ func ResolveSGLangBootstrapPort(ctx context.Context) int {
 		if rejected {
 			log.FromContext(ctx).WithName(loggerName).Error(
 				fmt.Errorf("invalid %s %q", envSGLangBootstrapPort, raw),
-				"using default SGLang bootstrap port", "default", DefaultSGLangBootstrapPort)
+				"using default SGLang bootstrap port", "default", defaultSGLangBootstrapPort)
 		}
 		sglangBootstrapPort = port
 	})

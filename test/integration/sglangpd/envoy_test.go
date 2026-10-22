@@ -78,7 +78,7 @@ func TestStreamingPrefillThroughEnvoy(t *testing.T) {
 					if body[reqcommon.FieldBootstrapHost] != "127.0.0.1" {
 						t.Errorf("bootstrap host not set by EPP: %v", body)
 					}
-					w.Header().Set("Content-Type", reqcommon.ContentTypeEventStream)
+					w.Header().Set("Content-Type", reqcommon.MediaTypeEventStream)
 					if r.Header.Get(reqcommon.EPPProfileHeaderKey) == gateway.PhasePrefill {
 						prefill = body
 						w.Header().Set(routing.PrefillEndpointHeader, "forged:1")

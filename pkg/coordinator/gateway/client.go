@@ -122,7 +122,7 @@ func (c *Client) Request(ctx context.Context, method, path string, body []byte, 
 
 	// Streamed responses must return headers before the body completes.
 	mediaType, _, _ := mime.ParseMediaType(resp.Header.Get(ContentTypeHeader))
-	if v := logger.V(logutil.TRACE); v.Enabled() && mediaType != reqcommon.ContentTypeEventStream {
+	if v := logger.V(logutil.TRACE); v.Enabled() && mediaType != reqcommon.MediaTypeEventStream {
 		respBody, err := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if err != nil {
