@@ -1238,24 +1238,11 @@ func TestPrefillStep_SGLangMissingEndpoint(t *testing.T) {
 
 func TestPrefillStep_SGLangCleanup(t *testing.T) {
 	grace := 50 * time.Millisecond
-	for _, tc := range []struct {
-		name    string
-		finish  func(*pipeline.PendingPrefill, context.CancelFunc)
-		minimum time.Duration
-	}{
-		{name: "client cancellation", finish: func(_ *pipeline.PendingPrefill, cancel context.CancelFunc) { cancel() }},
-		{name: "pipeline failure", finish: func(p *pipeline.PendingPrefill, _ context.CancelFunc) { p.Finish(false) }},
-		{
-			name: "grace expiry",
-			finish: func(p *pipeline.PendingPrefill, cancel context.CancelFunc) {
-				p.Finish(true)
-				cancel()
-			},
-			minimum: grace,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	for _, name := range []string{"client cancellation", "explicit abort", "grace expiry"} {
+		t.Run(name, func(t *testing.T) {
+			testCtx, stop := context.WithTimeout(t.Context(), 5*time.Second)
+			t.Cleanup(stop)
+			ctx, cancel := context.WithCancel(testCtx)
 			gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.Copy(io.Discard, r.Body)
 				w.Header().Set(reqcommon.HeaderContentType, request.MediaTypeEventStream)
@@ -1271,12 +1258,22 @@ func TestPrefillStep_SGLangCleanup(t *testing.T) {
 			require.NoError(t, step.Execute(ctx, reqCtx))
 			t.Cleanup(func() { reqCtx.Prefill.Finish(false) })
 			started := time.Now()
-			tc.finish(reqCtx.Prefill, cancel)
+			switch name {
+			case "client cancellation":
+				cancel()
+			case "explicit abort":
+				reqCtx.Prefill.Finish(false)
+			case "grace expiry":
+				reqCtx.Prefill.Finish(true)
+				cancel()
+			}
 			select {
 			case err := <-reqCtx.Prefill.Done:
 				require.ErrorIs(t, err, context.Canceled)
-				require.GreaterOrEqual(t, time.Since(started), tc.minimum)
-			case <-time.After(time.Second):
+				if name == "grace expiry" {
+					require.GreaterOrEqual(t, time.Since(started), grace)
+				}
+			case <-testCtx.Done():
 				t.Fatal("prefill did not cancel")
 			}
 		})
