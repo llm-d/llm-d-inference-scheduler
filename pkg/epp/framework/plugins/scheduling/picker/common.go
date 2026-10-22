@@ -24,6 +24,7 @@ limitations under the License.
 package picker
 
 import (
+	"hash/fnv"
 	"math"
 	"math/rand/v2"
 	"sync"
@@ -91,24 +92,16 @@ func (r *lockedRand) NextCounter(poolKey uint64) int {
 // PoolKey hashes the endpoint names of a candidate set, independent of their order.
 func PoolKey(scoredEndpoints []*fwksched.ScoredEndpoint) uint64 {
 	var key uint64
+	var buf []byte
+	h := fnv.New64a()
 	for _, ep := range scoredEndpoints {
 		id := ep.GetMetadata().GetNamespacedName()
-		key += fnv64a(fnv64a(fnv64a(fnvOffset64, id.Namespace), "/"), id.Name)
+		buf = append(append(append(buf[:0], id.Namespace...), '/'), id.Name...)
+		h.Reset()
+		_, _ = h.Write(buf)
+		key += h.Sum64()
 	}
 	return key
-}
-
-const (
-	fnvOffset64 = 14695981039346656037
-	fnvPrime64  = 1099511628211
-)
-
-func fnv64a(h uint64, s string) uint64 {
-	for i := range len(s) {
-		h ^= uint64(s[i])
-		h *= fnvPrime64
-	}
-	return h
 }
 
 // PickerRand is a thread-safe random number generator shared by all pickers to avoid seeding
