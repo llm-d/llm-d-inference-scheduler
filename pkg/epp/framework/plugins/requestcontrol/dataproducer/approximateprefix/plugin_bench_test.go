@@ -136,8 +136,8 @@ func BenchmarkProduce(b *testing.B) {
 func BenchmarkProduceCrossSync(b *testing.B) {
 	const (
 		numPods         = 96
-		peerPrompts     = 1
-		hashesPerPrompt = defaultLRUCapacityPerServer // default maxSyncedTokens / blockSizeTokens
+		peerPrompts     = 4
+		hashesPerPrompt = defaultLRUCapacityPerServer / peerPrompts // default window across 4 prompts
 	)
 	syncOn := true
 	syncOff := false

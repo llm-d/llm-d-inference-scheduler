@@ -102,17 +102,19 @@ sync interval (default `200ms`, `publishTimeout` default `1s`).
 **Request-path `Produce` (96 decode pods, `sharedPrefix` layout, Apple M5 Pro):**
 
 Default window budget is `maxSyncedTokens` = 2_000_000 (31250 hashes at
-`blockSizeTokens` = 64), matching `lruCapacityPerServer`.
+`blockSizeTokens` = 64), matching `lruCapacityPerServer`. Steady-window
+fixture is 4 prompts filling that budget (same shape as the earlier 256-hash
+bench, scaled up).
 
 | Mode | Median of 5 | Allocs/op | Relative to sync off |
 | --- | ---: | ---: | ---: |
-| `syncCrossReplicaState=false` | 44 µs | 424 | 1.0x |
-| Syncer configured, empty peer window | 41 µs | 424 | 0.95x |
-| Syncer configured, steady peer window (default `maxSyncedTokens` worth of hashes on every pod, already merged) | 27 µs | 500 | 0.61x |
+| `syncCrossReplicaState=false` | 37 µs | 424 | 1.0x |
+| Syncer configured, empty peer window | 40 µs | 424 | 1.06x |
+| Syncer configured, steady peer window (default budget, already merged) | 38 µs | 520 | 1.03x |
 
 Empty-window overhead is a `syncerActive` check plus a miss on the optional
 attribute. Steady-state merge skips work when the sync attribute digest is
-unchanged (Peek + cached `ContentDigest`), so cost stays at or below sync-off.
+unchanged (Peek + cached `ContentDigest`), so cost stays near sync-off.
 Novel prompts (window slides) pay snapshot, prompt-key, and indexer `Add` work.
 Reproduce with:
 
