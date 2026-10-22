@@ -605,21 +605,19 @@ func TestDecodeStep_GenerateFormat_ToplevelKV(t *testing.T) {
 	}
 }
 
-// TestDecodeStep_UnreachableFormat_ReturnsError verifies unsupported formats
-// fail before sending a request upstream.
-func TestDecodeStep_UnreachableFormat_ReturnsError(t *testing.T) {
+func TestDecodeStep_SGLangRequiresStreamingPrefill(t *testing.T) {
 	step, err := NewDecodeStep(gateway.New(config.GatewayConfig{}), map[string]any{ParamKVConnector: kv.NIXL})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath:     "/unsupported",
+		OriginalPath:     reqcommon.PathSGLangGenerate,
 		Body:             map[string]any{"model": testModelName},
 		KVTransferParams: map[string]any{"block_id": "block-1"},
 	}
 	if err := step.(*DecodeStep).prepareDecodeBody(context.Background(), reqCtx); err == nil {
-		t.Fatal("expected an error for an unreachable request format")
+		t.Fatal("expected an error for SGLang decode without a streaming prefill")
 	}
 }
 
