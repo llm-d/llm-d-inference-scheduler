@@ -54,6 +54,7 @@ func ValidateHistogramBuckets(edges []float64) error {
 	if len(edges) == 0 {
 		return errors.New("at least one bucket boundary is required")
 	}
+	var prev float64
 	for i, edge := range edges {
 		if math.IsNaN(edge) || math.IsInf(edge, 0) {
 			return fmt.Errorf("bucket boundary %d is %v, want a finite value", i, edge)
@@ -61,9 +62,10 @@ func ValidateHistogramBuckets(edges []float64) error {
 		if edge <= 0 {
 			return fmt.Errorf("bucket boundary %d is %v, want a positive value", i, edge)
 		}
-		if i > 0 && edge <= edges[i-1] {
-			return fmt.Errorf("bucket boundary %d is %v, want a value greater than the preceding %v", i, edge, edges[i-1])
+		if i > 0 && edge <= prev {
+			return fmt.Errorf("bucket boundary %d is %v, want a value greater than the preceding %v", i, edge, prev)
 		}
+		prev = edge
 	}
 	return nil
 }
