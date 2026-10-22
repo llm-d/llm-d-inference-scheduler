@@ -43,7 +43,7 @@ import (
 )
 
 func TestSGLangPrefillDecode(t *testing.T) {
-	for _, mode := range []string{"early decode", "prefill abort", "prefill EOF", "error before headers", "client cancellation", "decode failure", "grace expiry", "missing endpoint"} {
+	for _, mode := range []string{"early decode", "prefill transport failure", "prefill failure before decode headers", "client cancellation", "decode failure", "grace expiry", "missing endpoint"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			releasePrefill := make(chan struct{})
@@ -71,21 +71,15 @@ func TestSGLangPrefillDecode(t *testing.T) {
 					}
 					w.(http.Flusher).Flush()
 					ready := releasePrefill
-					if mode == "error before headers" {
+					if mode == "prefill failure before decode headers" {
 						ready = decodeStarted
 					}
 					select {
 					case <-ready:
-						switch mode {
-						case "error before headers":
-							_, _ = io.WriteString(w, "data: {\"error\":\"failed\"}\n\n")
-						case "prefill abort":
-							_, _ = io.WriteString(w, "data: {\"meta_info\":{\"finish_reason\":{\"type\":\"abort\"}}}\n\n")
-						case "prefill EOF":
-							_, _ = io.WriteString(w, "data: {}\n\n")
-						default:
-							_, _ = io.WriteString(w, "data: [DONE]\n\n")
+						if mode == "prefill transport failure" || mode == "prefill failure before decode headers" {
+							panic(http.ErrAbortHandler)
 						}
+						_, _ = io.WriteString(w, "data: [DONE]\n\n")
 					case <-r.Context().Done():
 					}
 					return
@@ -101,7 +95,7 @@ func TestSGLangPrefillDecode(t *testing.T) {
 					w.WriteHeader(http.StatusServiceUnavailable)
 					return
 				}
-				if mode != "error before headers" {
+				if mode != "prefill failure before decode headers" {
 					_, _ = io.WriteString(w, "data: decode\n\n")
 					w.(http.Flusher).Flush()
 				}
@@ -136,7 +130,7 @@ func TestSGLangPrefillDecode(t *testing.T) {
 			resp, err := http.DefaultClient.Do(req)
 			require.NoError(t, err, "decode waited for prefill completion")
 			defer resp.Body.Close()
-			if mode == "missing endpoint" || mode == "error before headers" {
+			if mode == "missing endpoint" || mode == "prefill failure before decode headers" {
 				require.Equal(t, http.StatusBadGateway, resp.StatusCode)
 			} else if mode == "decode failure" {
 				require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)

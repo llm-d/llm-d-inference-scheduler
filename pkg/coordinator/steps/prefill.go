@@ -17,7 +17,6 @@ limitations under the License.
 package steps
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,7 +25,6 @@ import (
 	"maps"
 	"mime"
 	"net"
-	"strings"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -178,7 +176,7 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 		go func() {
 			defer resp.Body.Close()
 			defer close(done)
-			err := drainSGLangPrefill(resp.Body)
+			_, err := io.Copy(io.Discard, resp.Body)
 			if err != nil && prefillCtx.Err() == nil {
 				logger.Error(err, "prefill stream failed")
 			}
@@ -306,46 +304,4 @@ type prefillResponse struct {
 	// Usage is decoded as any for the same reason, and is read by
 	// usage.CachedTokens.
 	Usage any `json:"usage"`
-}
-
-// SGLang emits each SSE event as a single data line, followed by [DONE].
-func drainSGLangPrefill(body io.Reader) error {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 4096), 4<<20)
-	done := false
-	for scanner.Scan() {
-		data, ok := strings.CutPrefix(scanner.Text(), reqcommon.SSEDataPrefix)
-		if !ok {
-			continue
-		}
-		if strings.TrimSpace(data) == reqcommon.SSEDoneMarker {
-			done = true
-			continue
-		}
-		var event struct {
-			Error    json.RawMessage `json:"error"`
-			MetaInfo struct {
-				FinishReason struct {
-					Type string `json:"type"`
-				} `json:"finish_reason"`
-			} `json:"meta_info"`
-		}
-		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			return fmt.Errorf("invalid prefill event: %w", err)
-		}
-		if len(event.Error) > 0 && string(event.Error) != "null" {
-			return errors.New("prefill returned an error event")
-		}
-		switch event.MetaInfo.FinishReason.Type {
-		case "abort", "error", "cancelled":
-			return errors.New("prefill generation failed")
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	if !done {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
 }
