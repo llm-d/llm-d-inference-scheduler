@@ -419,6 +419,11 @@ func (p *Producer) produceFromBlockKeys(ctx context.Context, span trace.Span,
 		}
 	}
 
+	// weightedScoreRoundOff absorbs float error in the summed tier weights
+	// before flooring: ten cpu-tier blocks at 0.8 sum to 7.999999999999999.
+	// It covers at least 278,000 blocks at any one default tier weight.
+	const weightedScoreRoundOff = 1e-6
+
 	maxMatch := 0
 	maxMMMatch := 0
 	results := make([]endpointResult, 0, len(endpoints))
@@ -438,7 +443,7 @@ func (p *Producer) produceFromBlockKeys(ctx context.Context, span trace.Span,
 		if match.BlocksByTier == nil {
 			match.BlocksByTier = map[string]int{} // no match: consumers still read a map
 		}
-		matchLen := int(match.WeightedScore)
+		matchLen := int(match.WeightedScore + weightedScoreRoundOff)
 		if matchLen > maxMatch {
 			maxMatch = matchLen
 		}
