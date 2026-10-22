@@ -129,7 +129,7 @@ func (s *SGLangPDStep) Execute(ctx context.Context, rc *pipeline.RequestContext)
 			}
 		}()
 	}()
-	resp, err := postToGateway(prefillCtx, logger, s.gwClient, gatewayRequest{
+	resp, err := postToGateway(prefillCtx, logger, s.gwClient, gatewayRequest{ //nolint:bodyclose // Closed on setup errors; otherwise owned by the prefill drain goroutine.
 		logMsg: "sending prefill", step: SGLangPDStepName, upstream: coordmetrics.UpstreamPrefill,
 		path: rc.OriginalPath, body: prefillBody, headers: gatewayHeaders(rc, gateway.PhasePrefill),
 	})
