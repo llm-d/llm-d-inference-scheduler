@@ -420,9 +420,12 @@ or 1. OpenAI APIs, rendering, and encode orchestration are unsupported. Pipeline
 connector defaults and `use_openai_format` do not apply to this step; retain the
 default `use_openai_format` value.
 
-The [Envoy integration test](../test/integration/sglangpd/envoy_test.go) verifies
-HTTP handoff and body mutation with the production parser and bootstrap plugin:
-`ENVOY_BINARY=/path/to/envoy go test ./test/integration/sglangpd -v`.
+The [coordinator E2E test](../test/coordinator/e2e/coordinator/sglang_pd_test.go)
+verifies early decode and bootstrap body mutation through the shared Envoy
+deployment and production EPP, with fixture workers that hold prefill open until
+decode arrives. It runs in both coordinator E2E topologies with
+`make -f Makefile.coord.mk test-e2e-coordinator` and
+`make -f Makefile.coord.mk test-e2e-coordinator-3epp`.
 Real SGLang KV transfer requires separate GPU validation.
 
 ### Cross-phase scheduling headers
