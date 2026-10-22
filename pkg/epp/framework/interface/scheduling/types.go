@@ -79,6 +79,9 @@ func (r *InferenceRequest) String() string {
 }
 
 type Endpoint interface {
+	// GetMetadata and GetMetrics return snapshots that may be shared with the
+	// datastore and with concurrent requests. Callers must treat them as
+	// read-only and Clone before modifying.
 	GetMetadata() *fwkdl.EndpointMetadata
 	GetMetrics() *fwkdl.Metrics
 	String() string
@@ -126,14 +129,26 @@ type endpoint struct {
 	fwkdl.AttributeMap
 }
 
+// NewEndpoint builds a scheduling endpoint that copies its inputs, so later
+// mutations of meta or metrics do not affect the endpoint.
 func NewEndpoint(meta *fwkdl.EndpointMetadata, metrics *fwkdl.Metrics, attr fwkdl.AttributeMap) Endpoint {
+	return NewEndpointFromSnapshot(meta.Clone(), metrics.Clone(), attr)
+}
+
+// NewEndpointFromSnapshot builds a scheduling endpoint that shares meta and
+// metrics with the caller. The caller must pass immutable snapshots and must
+// not mutate them after the call. The datastore replaces both wholesale, so
+// request-path callers use this to avoid a per-request copy. Attributes are
+// cloned because data producers write per-request values into the scheduling
+// endpoint.
+func NewEndpointFromSnapshot(meta *fwkdl.EndpointMetadata, metrics *fwkdl.Metrics, attr fwkdl.AttributeMap) Endpoint {
 	if attr == nil {
 		attr = fwkdl.NewAttributes()
 	}
 
 	return &endpoint{
-		EndpointMetadata: meta.Clone(),
-		Metrics:          metrics.Clone(),
+		EndpointMetadata: meta,
+		Metrics:          metrics,
 		AttributeMap:     attr.Clone(),
 	}
 }
