@@ -374,6 +374,28 @@ func TestBlockStoredOutOfOrderParentReplay(t *testing.T) {
 	}
 }
 
+func TestBlockRemovedCancelsOnePendingStore(t *testing.T) {
+	ctx := logging.NewTestLoggerIntoContext(context.Background())
+	pod := "pod-pending-remove"
+	pool, _, _ := newTestPool(t, 16)
+
+	child := &BlockStoredEvent{
+		BlockHashes: []uint64{202},
+		Tokens:      makeTokens(16),
+		ParentHash:  201,
+		DeviceTier:  "CPU",
+	}
+	pool.processEventBatch(ctx, &EventBatch{Events: []GenericEvent{child, child}}, pod, "test-model")
+
+	pool.processEventBatch(ctx, &EventBatch{Events: []GenericEvent{
+		&BlockRemovedEvent{BlockHashes: []uint64{202}, DeviceTier: "CPU"},
+	}}, pod, "test-model")
+
+	pool.pendingMu.Lock()
+	assert.Equal(t, 1, pool.pendingCount)
+	pool.pendingMu.Unlock()
+}
+
 // TestCanonicalWritePath_ManyToOne verifies the many:1 mapping when engine block size (16)
 // is smaller than canonical (64): 4 engine keys map to 1 canonical request key.
 func TestCanonicalWritePath_ManyToOne(t *testing.T) {

@@ -609,8 +609,7 @@ func (p *Pool) discardPendingStores(
 			key.groupIdx != groupIdx || key.dataParallelRank != pendingRank(rank) {
 			continue
 		}
-		kept := stores[:0]
-		for _, store := range stores {
+		for i, store := range stores {
 			removed := false
 			for _, hash := range store.event.BlockHashes {
 				if _, ok := hashes[hash]; ok {
@@ -620,14 +619,14 @@ func (p *Pool) discardPendingStores(
 			}
 			if removed {
 				p.pendingCount--
-				continue
+				stores = append(stores[:i], stores[i+1:]...)
+				break
 			}
-			kept = append(kept, store)
 		}
-		if len(kept) == 0 {
+		if len(stores) == 0 {
 			delete(p.pendingStores, key)
 		} else {
-			p.pendingStores[key] = kept
+			p.pendingStores[key] = stores
 		}
 	}
 	metrics.KVEventStoresPending.Set(float64(p.pendingCount))
