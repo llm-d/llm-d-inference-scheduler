@@ -407,6 +407,30 @@ var _ = Describe("Chunked Decode", func() {
 		Expect(content).To(Equal("hello world"))
 	})
 
+	DescribeTable("caps min_tokens to each chunk's budget",
+		func(minTokens, maxTokens, chunkSize int) {
+			ti := newChunkedTestSetupWithHandler(chunkSize, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req map[string]any
+				Expect(json.NewDecoder(r.Body).Decode(&req)).To(Succeed())
+				maxTok, _ := toInt(req[reqcommon.FieldMaxTokens])
+				if minTok, ok := toInt(req[reqcommon.FieldMinTokens]); ok && minTok > maxTok {
+					http.Error(w, `{"error":"min_tokens must be <= max_tokens"}`, http.StatusBadRequest)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, chatResponse("x", finishReasonLength, 8, maxTok))
+			}))
+			defer ti.stop()
+
+			resp := doPost(ti.addr, fmt.Sprintf(
+				`{"messages":[{"role":"user","content":"Hi"}],"max_tokens":%d,"min_tokens":%d}`,
+				maxTokens, minTokens))
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+		},
+		Entry("first chunk: min_tokens exceeds chunk budget", 17, 20, 16),
+		Entry("final chunk: remaining budget below min_tokens", 5, 50, 16),
+	)
+
 	Describe("non-streaming", func() {
 
 		It("falls back to regular decode when budget fits in one chunk", func() {
