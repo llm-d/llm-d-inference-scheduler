@@ -41,10 +41,20 @@ type EndpointMetadata struct {
 	Port        string
 	MetricsHost string
 	Labels      map[string]string
+	// Attributes holds discovery-declared string attributes for the endpoint
+	// (e.g. a file-discovery entry's attributes section). They are stamped
+	// onto the endpoint's attribute map at construction, keyed with
+	// DiscoveryAttributesProducer.
+	Attributes map[string]string
 	// RankIndex is this endpoint's position in the pool's TargetPorts,
 	// identifying the pod-local rank in multi-port deployments.
 	RankIndex int
 }
+
+// DiscoveryAttributesProducer is the producer name under which
+// discovery-declared EndpointMetadata.Attributes are stamped onto the
+// endpoint's attribute map.
+const DiscoveryAttributesProducer = "discovery"
 
 // String returns a string representation of the endpoint.
 func (epm *EndpointMetadata) String() string {
@@ -62,6 +72,8 @@ func (epm *EndpointMetadata) Clone() *EndpointMetadata {
 
 	clonedLabels := make(map[string]string, len(epm.Labels))
 	maps.Copy(clonedLabels, epm.Labels)
+	clonedAttributes := make(map[string]string, len(epm.Attributes))
+	maps.Copy(clonedAttributes, epm.Attributes)
 	return &EndpointMetadata{
 		ID: types.NamespacedName{
 			Name:      epm.ID.Name,
@@ -73,12 +85,13 @@ func (epm *EndpointMetadata) Clone() *EndpointMetadata {
 		Port:        epm.Port,
 		MetricsHost: epm.MetricsHost,
 		Labels:      clonedLabels,
+		Attributes:  clonedAttributes,
 		RankIndex:   epm.RankIndex,
 	}
 }
 
 // Equal reports whether two EndpointMetadata values describe the same endpoint
-// metadata. A nil Labels map and an empty Labels map are treated as equal.
+// metadata. A nil map and an empty map are treated as equal.
 func (epm *EndpointMetadata) Equal(other *EndpointMetadata) bool {
 	if epm == nil || other == nil {
 		return epm == other
@@ -90,7 +103,8 @@ func (epm *EndpointMetadata) Equal(other *EndpointMetadata) bool {
 		epm.Port == other.Port &&
 		epm.MetricsHost == other.MetricsHost &&
 		epm.RankIndex == other.RankIndex &&
-		maps.Equal(epm.Labels, other.Labels)
+		maps.Equal(epm.Labels, other.Labels) &&
+		maps.Equal(epm.Attributes, other.Attributes)
 }
 
 // GetRankIndex returns the rank index of this endpoint within the pool's

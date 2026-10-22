@@ -32,6 +32,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
+	attrstring "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/attribute/string"
 	"github.com/llm-d/llm-d-router/pkg/epp/metrics"
 )
 
@@ -461,6 +462,7 @@ func (r *Runtime) NewEndpoint(ctx context.Context, endpointMetadata *fwkdl.Endpo
 	logger = logger.WithValues("endpoint", endpointMetadata.GetID())
 
 	endpoint := fwkdl.NewEndpoint(endpointMetadata, nil)
+	stampDiscoveryAttributes(endpoint, endpointMetadata)
 
 	dispatchers := make([]fwkdl.PollingDispatcher, 0, r.dispatchers.Count())
 	for _, d := range r.dispatchers.Dispatchers() {
@@ -663,3 +665,17 @@ func findUnique(sourceType string, hits ...sourceHit) (sourceHit, error) {
 var _ EndpointFactory = (*Runtime)(nil)
 var _ fwkdl.Registrar = (*Runtime)(nil)
 var _ fwkplugin.ReadinessChecker = (*Runtime)(nil)
+
+// stampDiscoveryAttributes copies discovery-declared string attributes from
+// the endpoint's metadata onto its attribute map, keyed with
+// fwkdl.DiscoveryAttributesProducer, so downstream plugins can consume them
+// through the framework's declared data dependencies.
+func stampDiscoveryAttributes(ep fwkdl.Endpoint, meta *fwkdl.EndpointMetadata) {
+	if meta == nil || len(meta.Attributes) == 0 {
+		return
+	}
+	attrs := ep.GetAttributes()
+	for k, v := range meta.Attributes {
+		attrs.Put(fwkplugin.NewDataKey(k, fwkdl.DiscoveryAttributesProducer), attrstring.Value(v))
+	}
+}
