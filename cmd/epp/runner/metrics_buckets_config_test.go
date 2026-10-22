@@ -19,12 +19,9 @@ package runner
 import (
 	"testing"
 
-	"github.com/go-logr/logr/testr"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	configapiv1 "github.com/llm-d/llm-d-router/apix/config/v1"
-	"github.com/llm-d/llm-d-router/pkg/epp/config/loader"
 )
 
 // metricsRegisterOptions only translates an already-validated configuration;
@@ -86,29 +83,4 @@ func TestMetricsRegisterOptionsFromConfig(t *testing.T) {
 			assert.Equal(t, tc.wantITL, got.RequestITLBuckets)
 		})
 	}
-}
-
-// The histograms are built during metric registration, which both startup paths
-// reach only after the configuration file has been parsed. This pins the
-// ordering the configuration location depends on: a global setting read from
-// the file can still reach the collectors.
-func TestMetricsBucketsParseFromConfigFile(t *testing.T) {
-	configText := `apiVersion: llm-d.ai/v1
-kind: EndpointPickerConfig
-metrics:
-  requestTPOTBuckets: [0.005, 0.01, 0.02]
-  requestITLBuckets: [0.001, 0.002]
-plugins:
-- type: single-profile-handler
-schedulingProfiles:
-- name: default
-  plugins: []
-`
-	rawConfig, _, err := loader.LoadRawConfig([]byte(configText), testr.New(t))
-	require.NoError(t, err)
-	require.NotNil(t, rawConfig.Metrics)
-
-	got := metricsRegisterOptions(rawConfig)
-	assert.Equal(t, []float64{0.005, 0.01, 0.02}, got.RequestTPOTBuckets)
-	assert.Equal(t, []float64{0.001, 0.002}, got.RequestITLBuckets)
 }

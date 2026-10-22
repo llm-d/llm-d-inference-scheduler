@@ -432,9 +432,6 @@ type MetricsConfig struct {
 }
 
 func (mc *MetricsConfig) String() string {
-	if mc == nil {
-		return nilString
-	}
 	var parts []string
 	if len(mc.RequestTPOTBuckets) > 0 {
 		parts = append(parts, fmt.Sprintf("RequestTPOTBuckets: %v", mc.RequestTPOTBuckets))
