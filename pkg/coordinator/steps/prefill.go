@@ -225,7 +225,7 @@ func drainSGLangPrefill(resp *http.Response) error {
 			continue
 		}
 		var event struct {
-			Error    json.RawMessage `json:"error"`
+			Error    *json.RawMessage `json:"error"`
 			MetaInfo struct {
 				FinishReason struct {
 					Type       string `json:"type"`
@@ -237,8 +237,8 @@ func drainSGLangPrefill(resp *http.Response) error {
 		if err := json.Unmarshal(data, &event); err != nil {
 			return fmt.Errorf("decode SGLang prefill event: %w", err)
 		}
-		if len(event.Error) > 0 && !bytes.Equal(event.Error, []byte("null")) {
-			return fmt.Errorf("SGLang prefill error: %s", event.Error)
+		if event.Error != nil {
+			return fmt.Errorf("SGLang prefill error: %s", *event.Error)
 		}
 		finish := event.MetaInfo.FinishReason
 		// SGLang leaves status_code null for a user abort.

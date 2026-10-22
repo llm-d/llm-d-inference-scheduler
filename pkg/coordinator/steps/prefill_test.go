@@ -1254,7 +1254,7 @@ func TestDrainSGLangPrefill(t *testing.T) {
 		},
 		{
 			name: "user abort",
-			data: `{"meta_info":{"finish_reason":{"type":"abort","status_code":null}}}`,
+			data: `{"error":null,"meta_info":{"finish_reason":{"type":"abort","status_code":null}}}`,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
