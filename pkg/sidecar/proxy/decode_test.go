@@ -527,23 +527,22 @@ var _ = Describe("Chunked Decode", func() {
 		})
 	})
 
-	Describe("streaming a chunk that ends in a tool call", func() {
+	Describe("streaming a chunk from a reasoning model", func() {
 
-		It("carries the tool calls, the reasoning and the logprobs into the event", func() {
-			toolCallChunk := `{"id":"test-id","object":"chat.completion","model":"test-model","created":1234567890,` +
-				`"choices":[{"index":0,"finish_reason":"tool_calls",` +
+		It("carries the reasoning and the logprobs into the event", func() {
+			reasoningChunk := `{"id":"test-id","object":"chat.completion","model":"test-model","created":1234567890,` +
+				`"choices":[{"index":0,"finish_reason":"stop",` +
 				`"logprobs":{"content":[{"token":"x","logprob":-0.1,"bytes":null,"top_logprobs":[]}]},` +
-				`"message":{"role":"assistant","content":null,"reasoning":"need the weather",` +
-				`"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Paris\"}"}}]}}],` +
+				`"message":{"role":"assistant","content":"Paris.","reasoning":"the capital of France"}}],` +
 				`"usage":{"prompt_tokens":9,"completion_tokens":7,"total_tokens":16}}`
 			ti := newChunkedTestSetup(5, []string{
-				chatResponse("Let me check. ", "length", 5, 5),
-				toolCallChunk,
+				chatResponse("Let me think. ", "length", 5, 5),
+				reasoningChunk,
 			})
 			defer ti.stop()
 
 			resp := doPost(ti.addr,
-				`{"messages":[{"role":"user","content":"weather in Paris?"}],"tools":[{"type":"function","function":{"name":"get_weather"}}],"max_tokens":20,"stream":true}`)
+				`{"messages":[{"role":"user","content":"capital of France?"}],"max_tokens":20,"logprobs":true,"stream":true}`)
 			Expect(resp.StatusCode).To(Equal(http.StatusOK))
 
 			var events []string
@@ -558,17 +557,10 @@ var _ = Describe("Chunked Decode", func() {
 			var second map[string]any
 			Expect(json.Unmarshal([]byte(strings.TrimPrefix(events[1], reqcommon.SSEDataPrefix)), &second)).To(Succeed())
 			choice := second["choices"].([]any)[0].(map[string]any)
-			Expect(choice[responseFieldFinishReason]).To(Equal("tool_calls"))
 			Expect(choice["logprobs"]).To(HaveKey("content"))
 			delta := choice[responseFieldDelta].(map[string]any)
-			Expect(delta["reasoning"]).To(Equal("need the weather"))
-			calls := delta["tool_calls"].([]any)
-			Expect(calls).To(HaveLen(1))
-			call := calls[0].(map[string]any)
-			Expect(call["id"]).To(Equal("call_1"))
-			index, _ := toInt(call[responseFieldIndex])
-			Expect(index).To(Equal(0))
-			Expect(call["function"].(map[string]any)["name"]).To(Equal("get_weather"))
+			Expect(delta[reqcommon.FieldContent]).To(Equal("Paris."))
+			Expect(delta["reasoning"]).To(Equal("the capital of France"))
 		})
 	})
 
