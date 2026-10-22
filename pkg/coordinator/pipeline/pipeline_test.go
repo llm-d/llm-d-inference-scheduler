@@ -597,7 +597,6 @@ func TestExecute_ExecutionPathTable(t *testing.T) {
 		wantPath  string
 	}{
 		{"decode-only via cache hit", []string{"conditional-decode"}, metricsutil.DisaggPathDecodeOnly},
-		{"sglang streaming prefill-decode", []string{"sglang-pd"}, metricsutil.DisaggPathPrefillDecode},
 		{"prefill-decode without encode", []string{"prefill", "decode"}, metricsutil.DisaggPathPrefillDecode},
 		{"encode-prefill-decode full path", []string{"encode", "prefill", "decode"}, metricsutil.DisaggPathEncodePrefillDecode},
 	}
@@ -607,8 +606,8 @@ func TestExecute_ExecutionPathTable(t *testing.T) {
 			steps := make([]Step, 0, len(tc.stepNames))
 			for _, n := range tc.stepNames {
 				fn := func(_ context.Context, _ *RequestContext) error { return nil }
-				if n == "conditional-decode" || n == "sglang-pd" {
-					// Terminal steps return ErrPipelineDone; the executor
+				if n == "conditional-decode" {
+					// The cache-hit case returns ErrPipelineDone; the executor
 					// must still count the step toward the path.
 					fn = func(_ context.Context, _ *RequestContext) error { return ErrPipelineDone }
 				}

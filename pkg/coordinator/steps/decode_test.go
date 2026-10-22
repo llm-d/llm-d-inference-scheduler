@@ -605,10 +605,8 @@ func TestDecodeStep_GenerateFormat_ToplevelKV(t *testing.T) {
 	}
 }
 
-// TestDecodeStep_UnreachableFormat_ReturnsError verifies that a request path
-// for a format prepareDecodeBody's switch does not handle explicitly
-// (APITypeSGLangGenerate) fails through its default case, reporting an error
-// instead of sending an unprepared body upstream.
+// TestDecodeStep_UnreachableFormat_ReturnsError verifies unsupported formats
+// fail before sending a request upstream.
 func TestDecodeStep_UnreachableFormat_ReturnsError(t *testing.T) {
 	step, err := NewDecodeStep(gateway.New(config.GatewayConfig{}), map[string]any{ParamKVConnector: kv.NIXL})
 	if err != nil {
@@ -616,7 +614,7 @@ func TestDecodeStep_UnreachableFormat_ReturnsError(t *testing.T) {
 	}
 
 	reqCtx := &pipeline.RequestContext{
-		OriginalPath:     reqcommon.PathSGLangGenerate,
+		OriginalPath:     "/unsupported",
 		Body:             map[string]any{"model": testModelName},
 		KVTransferParams: map[string]any{"block_id": "block-1"},
 	}

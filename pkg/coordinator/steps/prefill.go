@@ -17,16 +17,24 @@ limitations under the License.
 package steps
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
+	"mime"
+	"net"
+	"strconv"
+	"strings"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	"github.com/llm-d/llm-d-router/pkg/common/routing"
 	"github.com/llm-d/llm-d-router/pkg/common/usage"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/connectors/ec"
@@ -34,6 +42,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
 	coordmetrics "github.com/llm-d/llm-d-router/pkg/coordinator/metrics"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/common/request"
 )
 
 const PrefillStepName = "prefill"
@@ -47,6 +56,7 @@ type PrefillStep struct {
 	gwClient        *gateway.Client
 	kv              kv.Connector
 	ec              ec.Connector
+	prefillGrace    time.Duration
 }
 
 func NewPrefillStep(gwClient *gateway.Client, params map[string]any) (pipeline.Step, error) {
@@ -65,11 +75,22 @@ func NewPrefillStep(gwClient *gateway.Client, params map[string]any) (pipeline.S
 	if err != nil {
 		return nil, fmt.Errorf("prefill: %w", err)
 	}
+	grace, present, err := paramDuration(params, "prefill_grace")
+	if err != nil {
+		return nil, err
+	}
+	if !present {
+		grace = 30 * time.Second
+	}
+	if grace <= 0 {
+		return nil, errors.New("prefill: prefill_grace must be positive")
+	}
 	return &PrefillStep{
 		useOpenAIFormat: useOpenAI,
 		gwClient:        gwClient,
 		kv:              kvConn,
 		ec:              ecConn,
+		prefillGrace:    grace,
 	}, nil
 }
 
@@ -79,6 +100,9 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 	logger := log.FromContext(ctx).WithName(PrefillStepName)
 
 	format := resolveFormat(s.useOpenAIFormat, reqCtx.OriginalPath)
+	if reqCtx.OriginalPath == reqcommon.PathSGLangGenerate {
+		format = reqcommon.APITypeSGLangGenerate
+	}
 	body, err := s.buildPrefillBody(ctx, reqCtx, format)
 	if err != nil {
 		return fmt.Errorf("prefill: %w", err)
@@ -92,7 +116,41 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 	path := format.Path()
 	logger.V(logutil.DEFAULT).Info("sending request", "path", path)
 
-	resp, err := postToGateway(ctx, logger, s.gwClient, gatewayRequest{
+	prefillCtx := ctx
+	var done chan error
+	handedOff := false
+	if format == reqcommon.APITypeSGLangGenerate {
+		if reqCtx.Prefill != nil {
+			return errors.New("prefill: a prefill stream is already running")
+		}
+		var cancel context.CancelFunc
+		prefillCtx, cancel = context.WithCancel(context.WithoutCancel(ctx))
+		stop := context.AfterFunc(ctx, cancel)
+		done = make(chan error, 1)
+		reqCtx.Prefill = &pipeline.PendingPrefill{Done: done, Finish: func(success bool) {
+			stop()
+			if !success {
+				cancel()
+				return
+			}
+			go func() {
+				defer cancel()
+				timer := time.NewTimer(s.prefillGrace)
+				defer timer.Stop()
+				select {
+				case <-done:
+				case <-timer.C:
+				}
+			}()
+		}}
+		defer func() {
+			if !handedOff {
+				reqCtx.Prefill.Finish(false)
+				reqCtx.Prefill = nil
+			}
+		}()
+	}
+	resp, err := postToGateway(prefillCtx, logger, s.gwClient, gatewayRequest{
 		logMsg:   "request body",
 		step:     PrefillStepName,
 		upstream: coordmetrics.UpstreamPrefill,
@@ -103,9 +161,36 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if !handedOff {
+			_ = resp.Body.Close()
+		}
+	}()
 
 	reqCtx.PeerTopology = resp.Header.Get(reqcommon.PeerTopologyHeaderKey)
+	reqCtx.CaptureResponseHeaders(resp.Header)
+	if done != nil {
+		mediaType, _, mediaErr := mime.ParseMediaType(resp.Header.Get(reqcommon.HeaderContentType))
+		endpoint := resp.Header.Get(routing.PrefillEndpointHeader)
+		host, port, endpointErr := net.SplitHostPort(endpoint)
+		portNumber, portErr := strconv.Atoi(port)
+		if mediaErr != nil || mediaType != request.MediaTypeEventStream || endpointErr != nil || host == "" || portErr != nil || portNumber < 1 || portNumber > 65535 {
+			return errors.New("prefill: streaming SGLang requires an event stream and a valid selected endpoint response header")
+		}
+		reqCtx.Prefill.Endpoint = endpoint
+		reqCtx.KVTransferParams[reqcommon.FieldBootstrapHost] = host
+		go func() {
+			defer resp.Body.Close()
+			defer close(done)
+			err := drainSGLangPrefill(resp.Body)
+			if err != nil && prefillCtx.Err() == nil {
+				logger.Error(err, "prefill stream failed")
+			}
+			done <- err
+		}()
+		handedOff = true
+		return nil
+	}
 
 	var prefillResp prefillResponse
 	if err := json.NewDecoder(resp.Body).Decode(&prefillResp); err != nil {
@@ -131,13 +216,32 @@ func (s *PrefillStep) Execute(ctx context.Context, reqCtx *pipeline.RequestConte
 		reqCtx.PrefillCachedTokens = &cachedTokens
 	}
 
-	reqCtx.CaptureResponseHeaders(resp.Header)
-
 	logger.V(logutil.DEFAULT).Info("complete")
 	return nil
 }
 
 func (s *PrefillStep) buildPrefillBody(ctx context.Context, reqCtx *pipeline.RequestContext, format reqcommon.APIType) (map[string]any, error) {
+	if format == reqcommon.APITypeSGLangGenerate {
+		if s.kv.Name() != kv.SGLang || !reqCtx.Stream {
+			return nil, fmt.Errorf("/generate prefill requires kv-sglang and stream=true: %w", pipeline.ErrBadRequest)
+		}
+		if sampling, present := reqCtx.Body[reqcommon.FieldSamplingParams]; present {
+			params, ok := sampling.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("SGLang prefill requires one sampling_params object: %w", pipeline.ErrBadRequest)
+			}
+			n, present, err := paramInt(params, "n")
+			if err != nil || (present && n != 1) {
+				return nil, fmt.Errorf("SGLang prefill requires sampling_params.n=1: %w", pipeline.ErrBadRequest)
+			}
+		}
+		body := maps.Clone(reqCtx.Body)
+		delete(body, reqcommon.FieldBootstrapHost)
+		reqCtx.KVTransferParams = s.kv.PreparePrefillKVParams(ctx, reqCtx)
+		maps.Copy(body, reqCtx.KVTransferParams)
+		body[reqcommon.FieldStream] = true
+		return body, nil
+	}
 	ecParams, err := s.ec.PreparePrefillECParams(ctx, reqCtx)
 	if err != nil {
 		return nil, err
@@ -207,4 +311,46 @@ type prefillResponse struct {
 	// Usage is decoded as any for the same reason, and is read by
 	// usage.CachedTokens.
 	Usage any `json:"usage"`
+}
+
+// SGLang emits each SSE event as a single data line, followed by [DONE].
+func drainSGLangPrefill(body io.Reader) error {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 4096), 4<<20)
+	done := false
+	for scanner.Scan() {
+		data, ok := strings.CutPrefix(scanner.Text(), reqcommon.SSEDataPrefix)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(data) == reqcommon.SSEDoneMarker {
+			done = true
+			continue
+		}
+		var event struct {
+			Error    json.RawMessage `json:"error"`
+			MetaInfo struct {
+				FinishReason struct {
+					Type string `json:"type"`
+				} `json:"finish_reason"`
+			} `json:"meta_info"`
+		}
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			return fmt.Errorf("invalid prefill event: %w", err)
+		}
+		if len(event.Error) > 0 && string(event.Error) != "null" {
+			return errors.New("prefill returned an error event")
+		}
+		switch event.MetaInfo.FinishReason.Type {
+		case "abort", "error", "cancelled":
+			return errors.New("prefill generation failed")
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if !done {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
 }

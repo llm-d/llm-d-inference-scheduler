@@ -177,10 +177,11 @@ type RequestContext struct {
 	// Populated by EncodeStep when the EC connector is ec-nixl; empty for
 	// ec-shared-storage.
 	ECTransferParams []map[string]any
-	// KVTransferParams carries the prefill pod's KV-cache transfer hints to the
-	// decode step. Populated by PrefillStep from the prefill response; consumed
-	// by the KV connector when building the decode request.
+	// KVTransferParams carries transfer parameters from prefill to decode.
+	// PrefillStep reads them from the response or creates SGLang bootstrap fields.
 	KVTransferParams map[string]any
+	// Prefill owns a streaming prefill request that overlaps later steps.
+	Prefill *PendingPrefill
 	// PrefillCachedTokens is the prompt-cache hit count the prefill worker
 	// reported, read from the details object its route documents:
 	// usage.prompt_tokens_details.cached_tokens, or
@@ -213,6 +214,14 @@ type RequestContext struct {
 
 	// ResponseWriter is used by decode steps to stream the final response to the client.
 	ResponseWriter http.ResponseWriter
+}
+
+// PendingPrefill carries the selected endpoint and completion of a prefill stream.
+// Decode calls Finish(true) on success; pipeline exit calls Finish(false) otherwise.
+type PendingPrefill struct {
+	Endpoint string
+	Done     <-chan error
+	Finish   func(success bool)
 }
 
 // MultimodalEntry describes one multimodal item in the request and where it

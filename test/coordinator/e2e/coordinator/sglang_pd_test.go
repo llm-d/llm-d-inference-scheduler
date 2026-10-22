@@ -78,8 +78,10 @@ gateway:
   timeout: 60s
 pipeline:
   use_openai_format: true
+  kv_connector: kv-sglang
   steps:
-  - type: sglang-pd
+  - type: prefill
+  - type: decode
 `
 
 const eppConfigSGLang = `apiVersion: llm-d.ai/v1

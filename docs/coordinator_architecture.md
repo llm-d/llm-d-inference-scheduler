@@ -340,23 +340,26 @@ for the comparison.
 
 ### Streaming SGLang prefill and decode
 
-For native SGLang `/generate` requests with `stream: true`, configure the terminal
-`sglang-pd` step instead of separate `prefill` and `decode` steps:
+For native SGLang `/generate` requests with `stream: true`, use `kv-sglang` with
+the `prefill` and `decode` steps:
 
 ```yaml
 pipeline:
+  use_openai_format: true
+  kv_connector: kv-sglang
   steps:
-    - type: sglang-pd
+    - type: prefill
       params:
         prefill_grace: 30s
+    - type: decode
 ```
 
 Set `SGLANG_BOOTSTRAP_PORT` to the prefill worker's bootstrap service port,
 reachable from both worker roles. The Rust frontend serves bootstrap on its HTTP
 port (for example, 8000). See [KV and EC transfer protocols](#kv-and-ec-transfer-protocols)
-for the shared setting. `prefill_grace` is the step's only parameter.
+for the shared setting. `prefill_grace` bounds prefill cleanup after decode succeeds.
 
-The step uses `kv-sglang` to create a numeric `bootstrap_room` and select the
+The prefill step uses `kv-sglang` to create a numeric `bootstrap_room` and select the
 `bootstrap_port` shared by both requests.
 The prefill EPP sets `bootstrap_host` in the request body and returns the selected
 worker's HTTP address in `x-llm-d-prefiller-host-port`. On receiving those response
@@ -726,7 +729,7 @@ edit: registration is the only wiring step.
 - Config values arrive as `map[string]any` decoded by viper. Integers decode as `int`,
   booleans as `bool`, durations as `string` (parse with `time.ParseDuration`), strings
   as `string`. Type-assert defensively and supply a default when the key is absent.
-- Connector defaults are injected into step `params` except for `sglang-pd` (see
+- Connector defaults are injected into step `params` (see
   [Connector selection](#connector-selection)). The constants are
   `steps.ParamKVConnector` and `steps.ParamECConnector`. `use_openai_format` is
   injected only into `encode` and `prefill`.
@@ -822,9 +825,8 @@ documented example is `COORDINATOR_PIPELINE_USE_OPENAI_FORMAT`. The CLI flag `-v
 ### Connector selection
 
 `pipeline.kv_connector` and `pipeline.ec_connector` are deployment-wide defaults. The
-builder injects them into step `params` except for `sglang-pd`, which implements the
-native SGLang protocol directly. Connector-using steps must agree with the connector
-configured on the vLLM pods.
+builder injects them into step `params`. Connector-using steps must agree with the
+connector configured on the model-serving pods.
 
 | Key | Values | Default |
 | :---- | :---- | :---- |

@@ -150,6 +150,12 @@ func NewWithForwardResponseHeaders(steps []Step, headers []string) (*Pipeline, e
 // Execute runs all steps in order. Any error aborts immediately.
 func (p *Pipeline) Execute(ctx context.Context, reqCtx *RequestContext) error {
 	logger := log.FromContext(ctx)
+	defer func() {
+		if reqCtx.Prefill != nil {
+			reqCtx.Prefill.Finish(false)
+			reqCtx.Prefill = nil
+		}
+	}()
 
 	ctx, span := tracing.Tracer(TracerScope).Start(ctx, pipelineSpanName,
 		trace.WithSpanKind(trace.SpanKindInternal),
@@ -312,13 +318,13 @@ func classifyExecutionPath(started, executed map[string]bool, doneBy, cancelledI
 	probeDeferred := executed["conditional-decode"] && doneBy != "conditional-decode"
 	probeAbandoned := cancelledIn == "conditional-decode"
 	probeIsDecode := started["conditional-decode"] && !probeDeferred && !probeAbandoned
-	if !started["decode"] && !started["sglang-pd"] && !probeIsDecode {
+	if !started["decode"] && !probeIsDecode {
 		return "", false
 	}
 	switch {
-	case started["encode"] && (started["prefill"] || started["sglang-pd"]):
+	case started["encode"] && started["prefill"]:
 		return metricsutil.DisaggPathEncodePrefillDecode, true
-	case started["prefill"] || started["sglang-pd"]:
+	case started["prefill"]:
 		return metricsutil.DisaggPathPrefillDecode, true
 	default:
 		return metricsutil.DisaggPathDecodeOnly, true

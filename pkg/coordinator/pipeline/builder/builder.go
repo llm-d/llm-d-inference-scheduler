@@ -37,9 +37,6 @@ import (
 // produces, so it requires a render step in the pipeline.
 func validatePipeline(p config.PipelineConfig) error {
 	for i, s := range p.Steps {
-		if s.Type == steps.SGLangPDStepName && i != len(p.Steps)-1 {
-			return fmt.Errorf("the %q step must be the last pipeline step", steps.SGLangPDStepName)
-		}
 		if s.Type == asyncbroker.StepName && i > 0 {
 			return fmt.Errorf("the %q step must be the first pipeline step, found it at position %d", asyncbroker.StepName, i+1)
 		}
@@ -85,10 +82,7 @@ func Build(cfg *config.Config, gwClient *gateway.Client) (*pipeline.Pipeline, er
 
 	pipelineSteps := make([]pipeline.Step, 0, len(cfg.Pipeline.Steps))
 	for _, stepCfg := range cfg.Pipeline.Steps {
-		params := stepCfg.Params
-		if stepCfg.Type != steps.SGLangPDStepName {
-			params = mergePipelineDefaults(params, cfg.Pipeline)
-		}
+		params := mergePipelineDefaults(stepCfg.Params, cfg.Pipeline)
 		if usesOpenAIFormatParam(stepCfg.Type) {
 			if _, ok := params["use_openai_format"]; !ok {
 				params["use_openai_format"] = cfg.Pipeline.UseOpenAIFormat

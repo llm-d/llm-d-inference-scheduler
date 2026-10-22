@@ -19,7 +19,6 @@ package builder
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/config"
@@ -33,13 +32,11 @@ func TestValidatePipeline(t *testing.T) {
 	decode := config.StepConfig{Type: steps.DecodeStepName}
 	broker := config.StepConfig{Type: asyncbroker.StepName}
 
-	sglangPD := config.StepConfig{Type: steps.SGLangPDStepName}
 	tests := []struct {
 		name    string
 		cfg     config.PipelineConfig
 		wantErr bool
 	}{
-		{name: "sglang pd is terminal", cfg: config.PipelineConfig{UseOpenAIFormat: true, Steps: []config.StepConfig{sglangPD, decode}}, wantErr: true},
 		{
 			name:    "openai format needs no render",
 			cfg:     config.PipelineConfig{UseOpenAIFormat: true, Steps: []config.StepConfig{decode}},
@@ -136,35 +133,5 @@ func TestBuildRejectsInvalidForwardResponseHeaders(t *testing.T) {
 	}}
 	if _, err := Build(cfg, nil); err == nil {
 		t.Fatal("Build() expected an error for a non-forwardable response header")
-	}
-}
-
-func TestBuildSGLangPDConfiguration(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		params    map[string]any
-		wantError string
-	}{
-		{name: "pipeline connector defaults do not apply"},
-		{name: "explicit kv connector rejected", params: map[string]any{steps.ParamKVConnector: "kv-sglang"}, wantError: "kv_connector"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := &config.Config{Pipeline: config.PipelineConfig{
-				UseOpenAIFormat: true,
-				KVConnector:     "kv-nixl",
-				ECConnector:     "ec-nixl",
-				Steps: []config.StepConfig{
-					{Type: steps.SGLangPDStepName, Params: tc.params},
-				},
-			}}
-			_, err := Build(cfg, gateway.New(config.GatewayConfig{}))
-			if tc.wantError == "" {
-				if err != nil {
-					t.Fatalf("Build() unexpected error: %v", err)
-				}
-			} else if err == nil || !strings.Contains(err.Error(), tc.wantError) {
-				t.Fatalf("Build() error = %v, want error containing %q", err, tc.wantError)
-			}
-		})
 	}
 }
