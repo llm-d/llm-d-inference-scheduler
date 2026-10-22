@@ -34,6 +34,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/coordinator/connectors/kv"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/common/request"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -231,7 +232,7 @@ func TestSGLangPDPrefillFailureAbortsStreamingClient(t *testing.T) {
 	failPrefill := make(chan struct{})
 	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
-		w.Header().Set("Content-Type", reqcommon.MediaTypeEventStream)
+		w.Header().Set("Content-Type", request.MediaTypeEventStream)
 		if r.Header.Get(reqcommon.EPPProfileHeaderKey) == gateway.PhasePrefill {
 			w.Header().Set(routing.PrefillEndpointHeader, "10.0.0.7:8000")
 			w.(http.Flusher).Flush()

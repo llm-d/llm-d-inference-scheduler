@@ -46,6 +46,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/steps"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/common/request"
 	fwkdl "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/datalayer"
 	fwkrc "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requestcontrol"
 	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
@@ -78,7 +79,7 @@ func TestStreamingPrefillThroughEnvoy(t *testing.T) {
 					if body[reqcommon.FieldBootstrapHost] != "127.0.0.1" {
 						t.Errorf("bootstrap host not set by EPP: %v", body)
 					}
-					w.Header().Set("Content-Type", reqcommon.MediaTypeEventStream)
+					w.Header().Set("Content-Type", request.MediaTypeEventStream)
 					if r.Header.Get(reqcommon.EPPProfileHeaderKey) == gateway.PhasePrefill {
 						prefill = body
 						w.Header().Set(routing.PrefillEndpointHeader, "forged:1")

@@ -39,6 +39,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/coordinator/gateway"
 	coordmetrics "github.com/llm-d/llm-d-router/pkg/coordinator/metrics"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/pipeline"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/common/request"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -140,7 +141,7 @@ func (s *SGLangPDStep) Execute(ctx context.Context, rc *pipeline.RequestContext)
 	endpoint := resp.Header.Get(routing.PrefillEndpointHeader)
 	host, port, endpointErr := net.SplitHostPort(endpoint)
 	portNumber, portErr := strconv.Atoi(port)
-	if err != nil || mediaType != reqcommon.MediaTypeEventStream || endpointErr != nil || host == "" || portErr != nil || portNumber < 1 || portNumber > 65535 {
+	if err != nil || mediaType != request.MediaTypeEventStream || endpointErr != nil || host == "" || portErr != nil || portNumber < 1 || portNumber > 65535 {
 		_ = resp.Body.Close()
 		return errors.New("sglang-pd: prefill requires an event stream and a valid selected endpoint response header")
 	}

@@ -46,8 +46,6 @@ const (
 	HeaderContentType = "content-type"
 	// ContentTypeJSON is the media type of JSON bodies.
 	ContentTypeJSON = "application/json"
-	// MediaTypeEventStream is the media type of Server-Sent Events.
-	MediaTypeEventStream = "text/event-stream"
 	// HeaderContentTypeOptions names the HTTP header that controls MIME sniffing of a body.
 	HeaderContentTypeOptions = "x-content-type-options"
 	// ContentTypeOptionsNoSniff disables MIME sniffing; http.Error sets it on every body it writes.

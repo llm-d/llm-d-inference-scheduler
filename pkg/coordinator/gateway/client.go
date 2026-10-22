@@ -34,6 +34,7 @@ import (
 
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/common/request"
 
 	"github.com/llm-d/llm-d-router/pkg/coordinator/common/httplog"
 	"github.com/llm-d/llm-d-router/pkg/coordinator/config"
@@ -123,7 +124,7 @@ func (c *Client) Request(ctx context.Context, method, path string, body []byte, 
 
 	// Streamed responses must return headers before the body completes.
 	mediaType, _, _ := mime.ParseMediaType(resp.Header.Get(ContentTypeHeader))
-	if v := logger.V(logutil.TRACE); v.Enabled() && mediaType != reqcommon.MediaTypeEventStream {
+	if v := logger.V(logutil.TRACE); v.Enabled() && mediaType != request.MediaTypeEventStream {
 		respBody, readErr := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		var replay io.Reader = bytes.NewReader(respBody)
