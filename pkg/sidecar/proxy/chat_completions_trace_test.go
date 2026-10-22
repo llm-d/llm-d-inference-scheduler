@@ -360,6 +360,7 @@ func TestToolCallingPassthroughBody(t *testing.T) {
 			t.Cleanup(func() { require.NoError(t, provider.Shutdown(context.Background())) })
 			ctx, span := provider.Tracer(tracerScope).Start(context.Background(), "forward_request")
 			ctx = context.WithValue(ctx, toolCallingRequestSpanKey, span)
+			ctx = context.WithValue(ctx, toolCallingTelemetryEnabledKey{}, true)
 			source := &toolCallingTestBody{body: body[:tt.read], err: tt.readErr, closeErr: closeErr}
 			r := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, nil).WithContext(ctx)
 			r.Body, r.ContentLength = source, tt.length
@@ -419,7 +420,7 @@ func (b *toolCallingTestBody) Close() error {
 
 func TestToolCallingPassthroughConcurrentClose(t *testing.T) {
 	reader, writer := io.Pipe()
-	r := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, nil)
+	r := withToolCallingTelemetry(httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, nil))
 	r.Body, r.ContentLength = reader, -1
 	observeToolCallingPassthrough(r, reqcommon.APITypeChatCompletions)
 	done := make(chan error, 1)
@@ -572,6 +573,7 @@ func TestChunkedDecodeSpanWithoutDispatchedChunk(t *testing.T) {
 	defer cancel()
 	ctx, root := provider.Tracer(tracerScope).Start(ctx, "forward_request")
 	ctx = context.WithValue(ctx, toolCallingRequestSpanKey, root)
+	ctx = context.WithValue(ctx, toolCallingTelemetryEnabledKey{}, true)
 	ctx, decode := provider.Tracer(tracerScope).Start(ctx, "decode")
 	r := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(original)).WithContext(ctx)
 	toolFields, err := captureInferenceToolCallingRequest(r, reqcommon.APITypeChatCompletions, []byte(original))
@@ -625,6 +627,7 @@ func TestPDToolCallingStageSpans(t *testing.T) {
 					require.NoError(t, err)
 					ctx, root := tracing.Tracer(tracerScope).Start(context.Background(), "forward_request")
 					ctx = context.WithValue(ctx, toolCallingRequestSpanKey, root)
+					ctx = context.WithValue(ctx, toolCallingTelemetryEnabledKey{}, true)
 					r := httptest.NewRequest(http.MethodPost, api.Path(), strings.NewReader(string(encoded))).WithContext(ctx)
 					rw := httptest.NewRecorder()
 					switch connector {
@@ -704,6 +707,7 @@ func TestPDToolCallingSummaryOnSetupFailure(t *testing.T) {
 				}
 				ctx, root := tracing.Tracer(tracerScope).Start(context.Background(), "forward_request")
 				ctx = context.WithValue(ctx, toolCallingRequestSpanKey, root)
+				ctx = context.WithValue(ctx, toolCallingTelemetryEnabledKey{}, true)
 				r := httptest.NewRequest(http.MethodPost, tt.api.Path(), strings.NewReader(tt.body)).WithContext(ctx)
 				rw := httptest.NewRecorder()
 				before := toolFieldCounters(t)
@@ -734,6 +738,7 @@ func TestToolCallingStageSpanComparisons(t *testing.T) {
 	const original = `{"tools":[],"tool_choice":"auto"}`
 	ctx, root := provider.Tracer(tracerScope).Start(context.Background(), "forward_request")
 	ctx = context.WithValue(ctx, toolCallingRequestSpanKey, root)
+	ctx = context.WithValue(ctx, toolCallingTelemetryEnabledKey{}, true)
 	inbound := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, nil).WithContext(ctx)
 	request, err := captureInferenceToolCallingRequest(inbound, reqcommon.APITypeChatCompletions, []byte(original))
 	require.NoError(t, err)

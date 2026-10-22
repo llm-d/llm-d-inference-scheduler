@@ -35,10 +35,8 @@ const toolCallingRequestSpanKey contextKey = "toolCallingRequestSpan"
 type toolCallingTelemetryEnabledKey struct{}
 
 func toolCallingTelemetryEnabled(ctx context.Context) bool {
-	// The HTTP handler supplies an explicit setting. Internal callers without
-	// one retain the connector helpers' existing observation behavior.
-	enabled, set := ctx.Value(toolCallingTelemetryEnabledKey{}).(bool)
-	return !set || enabled
+	enabled, _ := ctx.Value(toolCallingTelemetryEnabledKey{}).(bool)
+	return enabled
 }
 
 // toolCallingRequest is owned by the dispatching goroutine. Comparisons for

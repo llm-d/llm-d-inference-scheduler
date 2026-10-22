@@ -161,7 +161,11 @@ func chatRequest(t *testing.T, body map[string]any) *http.Request {
 	t.Helper()
 	raw, err := json.Marshal(body)
 	require.NoError(t, err)
-	return httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, bytes.NewReader(raw))
+	return withToolCallingTelemetry(httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, bytes.NewReader(raw)))
+}
+
+func withToolCallingTelemetry(r *http.Request) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), toolCallingTelemetryEnabledKey{}, true))
 }
 
 func textChatBody() map[string]any {
@@ -464,7 +468,7 @@ func TestECToolCallingMetrics(t *testing.T) {
 					body += "," + tt.fields
 				}
 				body += "}"
-				r := httptest.NewRequest(http.MethodPost, tt.api.Path(), strings.NewReader(body))
+				r := withToolCallingTelemetry(httptest.NewRequest(http.MethodPost, tt.api.Path(), strings.NewReader(body)))
 				if tt.route == "dp" || tt.route == "missing" {
 					s.forwardDataParallel = true
 					r.Header.Set(routing.DataParallelEndpointHeader, decodeURL.Host)
@@ -549,7 +553,7 @@ func TestECPipelineToolCallingOutcomes(t *testing.T) {
 					baseline = nil
 				}
 				r := httptest.NewRequest(http.MethodPost, api.Path(), nil)
-				r = r.WithContext(context.WithValue(r.Context(), toolCallingBaselineKey, baseline))
+				r = withToolCallingTelemetry(r.WithContext(context.WithValue(r.Context(), toolCallingBaselineKey, baseline)))
 				s := NewProxy(Config{})
 				called := false
 				decoder := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1270,7 +1274,7 @@ func TestSharedStorageToolCallingDecodeAbort(t *testing.T) {
 			if mode == "streaming decode first" {
 				body = `{"tools":[],"cache_hit_threshold":0.5,"stream":true}`
 			}
-			r := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(body))
+			r := withToolCallingTelemetry(httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(body)))
 			before := toolFieldCounters(t)
 			require.PanicsWithValue(t, http.ErrAbortHandler, func() {
 				s.handleSharedStorage(httptest.NewRecorder(), r, prefillURL.Host, reqcommon.APITypeChatCompletions)
@@ -1699,7 +1703,7 @@ func TestChunkedDecodeToolCallingDispatchBoundaries(t *testing.T) {
 			require.NoError(t, err)
 			toolFields, err := captureToolCallingRequest(reqcommon.APITypeChatCompletions, []byte(requestBody))
 			require.NoError(t, err)
-			r := httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(requestBody))
+			r := withToolCallingTelemetry(httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(requestBody)))
 			ctx, cancel := context.WithCancel(r.Context())
 			defer cancel()
 			r = r.WithContext(ctx)
@@ -1769,7 +1773,7 @@ func TestChunkedDecodeToolCallingDispatchBoundaries(t *testing.T) {
 		s.decoderProxy = http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) })
 		before := toolFieldCounters(t)
 		require.PanicsWithValue(t, http.ErrAbortHandler, func() {
-			s.runChunkedDecode(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(original)))
+			s.runChunkedDecode(httptest.NewRecorder(), withToolCallingTelemetry(httptest.NewRequest(http.MethodPost, reqcommon.PathChatCompletions, strings.NewReader(original))))
 		})
 		want := map[[2]string]float64{
 			{string(toolcalling.FieldTools), string(toolcalling.FieldStatusPreserved)}:      1,
@@ -2063,7 +2067,7 @@ func TestP2PToolCallingMetrics(t *testing.T) {
 					s := NewProxy(Config{Port: "8000", DecoderURL: decodeURL, KVConnector: constants.KVConnectorOffloading})
 					s.logger = log.Log
 					s.createRoutes()
-					r := httptest.NewRequest(http.MethodPost, tt.api.Path(), strings.NewReader(tt.body))
+					r := withToolCallingTelemetry(httptest.NewRequest(http.MethodPost, tt.api.Path(), strings.NewReader(tt.body)))
 					rw := httptest.NewRecorder()
 					before := toolFieldCounters(t)
 					if path == "prefill and decode" {
@@ -2473,7 +2477,7 @@ func TestHandleNIXLV2ParallelToolCallingMetrics(t *testing.T) {
 			}
 			before := toolFieldCounters(t)
 			rw := httptest.NewRecorder()
-			r := httptest.NewRequest(http.MethodPost, tt.api.Path(), strings.NewReader(tt.body))
+			r := withToolCallingTelemetry(httptest.NewRequest(http.MethodPost, tt.api.Path(), strings.NewReader(tt.body)))
 			if tt.dataParallel {
 				s.forwardDataParallel = true
 				if !tt.missingReplica {
@@ -2808,7 +2812,7 @@ func BenchmarkToolCallingPassthrough(b *testing.B) {
 						b.ReportAllocs()
 						b.SetBytes(int64(len(body)))
 						for b.Loop() {
-							r := &http.Request{Body: io.NopCloser(strings.NewReader(body)), ContentLength: int64(len(body))}
+							r := withToolCallingTelemetry(&http.Request{Body: io.NopCloser(strings.NewReader(body)), ContentLength: int64(len(body))})
 							if observe {
 								observeToolCallingPassthrough(r, api)
 							}
@@ -2829,7 +2833,7 @@ func BenchmarkToolCallingRequestDispatch(b *testing.B) {
 				body := []byte(toolCallingBenchmarkBody(b, api, size, toolRequest))
 				for _, dispatches := range []int{1, 2} {
 					b.Run(fmt.Sprintf("%s/%d/tools=%t/dispatches=%d", api, size, toolRequest, dispatches), func(b *testing.B) {
-						r := &http.Request{}
+						r := withToolCallingTelemetry(&http.Request{})
 						b.ReportAllocs()
 						b.SetBytes(int64(len(body)))
 						for b.Loop() {
@@ -3012,6 +3016,12 @@ func TestIndexToolJSONStringSpecial(t *testing.T) {
 
 func TestCaptureInferenceToolCallingRequest(t *testing.T) {
 	const original = `{"tools":[],"tool_choice":"auto"}`
+	t.Run("missing enablement", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/", nil)
+		request, err := captureInferenceToolCallingRequest(r, reqcommon.APITypeChatCompletions, []byte(original))
+		require.NoError(t, err)
+		require.Nil(t, request)
+	})
 	for _, api := range []reqcommon.APIType{reqcommon.APITypeChatCompletions, reqcommon.APITypeMessages} {
 		t.Run(api.String(), func(t *testing.T) {
 			baseline, err := captureToolCallingRequest(api, []byte(original))
@@ -3019,7 +3029,7 @@ func TestCaptureInferenceToolCallingRequest(t *testing.T) {
 			_, err = baseline.compareDispatched([]byte(`{}`))
 			require.NoError(t, err)
 			r := httptest.NewRequest(http.MethodPost, "/", nil)
-			r = r.WithContext(context.WithValue(r.Context(), toolCallingBaselineKey, baseline))
+			r = withToolCallingTelemetry(r.WithContext(context.WithValue(r.Context(), toolCallingBaselineKey, baseline)))
 			// A cloned handoff uses the snapshot, not the modified body or prior outcomes.
 			first, err := captureInferenceToolCallingRequest(r.Clone(r.Context()), api, []byte(`{`))
 			require.NoError(t, err)
@@ -3044,7 +3054,7 @@ func TestCaptureInferenceToolCallingRequest(t *testing.T) {
 		})
 	}
 	t.Run("no handoff", func(t *testing.T) {
-		r := httptest.NewRequest(http.MethodPost, "/", nil)
+		r := withToolCallingTelemetry(httptest.NewRequest(http.MethodPost, "/", nil))
 		request, err := captureInferenceToolCallingRequest(r, reqcommon.APITypeChatCompletions, []byte(original))
 		require.NoError(t, err)
 		_, err = request.compareDispatched([]byte(`{}`))
@@ -3054,7 +3064,7 @@ func TestCaptureInferenceToolCallingRequest(t *testing.T) {
 		})
 	})
 	t.Run("failed capture stays disabled", func(t *testing.T) {
-		r := httptest.NewRequest(http.MethodPost, "/", nil)
+		r := withToolCallingTelemetry(httptest.NewRequest(http.MethodPost, "/", nil))
 		r = r.WithContext(context.WithValue(r.Context(), toolCallingBaselineKey, (*toolCallingRequest)(nil)))
 		request, err := captureInferenceToolCallingRequest(r, reqcommon.APITypeChatCompletions, []byte(original))
 		require.Error(t, err)
@@ -3064,7 +3074,7 @@ func TestCaptureInferenceToolCallingRequest(t *testing.T) {
 		baseline, err := captureToolCallingRequest(reqcommon.APITypeChatCompletions, []byte(original))
 		require.NoError(t, err)
 		r := httptest.NewRequest(http.MethodPost, "/", nil)
-		r = r.WithContext(context.WithValue(r.Context(), toolCallingBaselineKey, baseline))
+		r = withToolCallingTelemetry(r.WithContext(context.WithValue(r.Context(), toolCallingBaselineKey, baseline)))
 		request, err := captureInferenceToolCallingRequest(r, reqcommon.APITypeMessages, []byte(original))
 		require.Error(t, err)
 		require.Nil(t, request)
