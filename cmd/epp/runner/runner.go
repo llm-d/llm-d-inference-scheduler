@@ -75,7 +75,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/cross_plugin/redis"
 	discoveryfile "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/discovery/file"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/discovery/k8speer"
-	attribute "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/extractor/attribute"
+	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/extractor/attribute"
 	extdcgm "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/extractor/dcgm"
 	labelproducer "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/extractor/label"
 	extractormetrics "github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/datalayer/extractor/metrics"

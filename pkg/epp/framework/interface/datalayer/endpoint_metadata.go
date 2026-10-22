@@ -40,10 +40,16 @@ type EndpointMetadata struct {
 	NodeAddress string
 	Port        string
 	MetricsHost string
-	Labels      map[string]string
-	// Attributes holds discovery-declared string attributes for the endpoint
-	// (e.g. a file-discovery entry's attributes section), surfaced on the
-	// endpoint by the attributes-producer extractor.
+	// Labels is the endpoint's matching/filtering vocabulary: selector
+	// matching (InferencePool), bylabel filters, and special-purpose keys
+	// with producer-level handling (metricsAddress/metricsPort).
+	Labels map[string]string
+	// Attributes holds discovery-declared request-shaping data for the
+	// endpoint (e.g. a file-discovery entry's attributes section: routing
+	// hints like pathPrefix/model that plugins stamp onto outgoing
+	// requests), surfaced by the attributes-producer extractor. Kept
+	// separate from Labels so request-shaping data never becomes a
+	// selector key — and selector labels are never stamped onto requests.
 	Attributes map[string]string
 	// RankIndex is this endpoint's position in the pool's TargetPorts,
 	// identifying the pod-local rank in multi-port deployments.
