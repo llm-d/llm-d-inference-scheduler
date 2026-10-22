@@ -49,7 +49,7 @@ type Registry struct {
 }
 
 type regEntry struct {
-	typ          reflect.Type
+	valueType    reflect.Type
 	producerName string
 	attrs        map[string]string
 	allAttrs     bool
@@ -67,7 +67,7 @@ func (r *Registry) TypeOf(key plugin.DataKey) reflect.Type {
 	if r == nil {
 		return nil
 	}
-	return r.entries[key.String()].typ
+	return r.entries[key.String()].valueType
 }
 
 // Has reports whether the registry knows about key.
@@ -113,10 +113,10 @@ func BuildRegistry(plugins []plugin.Plugin) (*Registry, error) {
 			declared, attrs, allAttrs := unpackProduced(val)
 			existing, found := r.entries[dk.String()]
 			if found {
-				if !typesCompatible(existing.typ, declared) {
+				if !typesCompatible(existing.valueType, declared) {
 					return nil, fmt.Errorf(
 						"data key %q is produced by %q with type %v, but already registered with type %v",
-						dk.String(), p.TypedName().String(), declared, existing.typ,
+						dk.String(), p.TypedName().String(), declared, existing.valueType,
 					)
 				}
 				if existing.allAttrs != allAttrs || !maps.Equal(existing.attrs, attrs) {
@@ -128,7 +128,7 @@ func BuildRegistry(plugins []plugin.Plugin) (*Registry, error) {
 				continue
 			}
 			r.entries[dk.String()] = regEntry{
-				typ:          declared,
+				valueType:    declared,
 				producerName: p.TypedName().String(),
 				attrs:        maps.Clone(attrs),
 				allAttrs:     allAttrs,
@@ -181,10 +181,10 @@ func (r *Registry) checkKey(consumerName string, dk plugin.DataKey, val any) err
 			consumerName, dk.String(),
 		)
 	}
-	if !typesCompatible(entry.typ, declared) {
+	if !typesCompatible(entry.valueType, declared) {
 		return fmt.Errorf(
 			"plugin %q consumes data key %q with type %v, but the producer declared type %v",
-			consumerName, dk.String(), declared, entry.typ,
+			consumerName, dk.String(), declared, entry.valueType,
 		)
 	}
 	if matches != nil && !entry.allAttrs {
