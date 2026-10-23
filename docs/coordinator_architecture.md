@@ -222,7 +222,7 @@ completions prompt is already a token array). See
 
 | Component | Path | Responsibility |
 | :---- | :---- | :---- |
-| Entry server | [pkg/coordinator/server/](../pkg/coordinator/server/) | chi server, TLS unless `secure_serving` is false. Accepts `/v1/chat/completions`, `/v1/completions`, `/v1/responses`, `/v1/messages`, and `/inference/v1/generate`, builds the `RequestContext`, runs the pipeline, exposes `/healthz` and `/readyz`, and passes any other path through to the gateway. |
+| Entry server | [pkg/coordinator/server/](../pkg/coordinator/server/) | chi server, TLS unless `secure_serving` is false. Accepts `/v1/chat/completions`, `/v1/completions`, `/v1/responses`, `/v1/messages`, `/inference/v1/generate`, and `/generate`, builds the `RequestContext`, runs the pipeline, exposes `/healthz` and `/readyz`, and passes any other path through to the gateway. |
 | Pipeline | [pkg/coordinator/pipeline/](../pkg/coordinator/pipeline/) | The `Step` abstraction, the ordered executor, the step registry, and the `RequestContext`. |
 | Steps | [pkg/coordinator/steps/](../pkg/coordinator/steps/) | The built-in steps. Each registers itself with the pipeline registry in an `init()` function. |
 | Gateway client | [pkg/coordinator/gateway/](../pkg/coordinator/gateway/) | HTTP client with a keep-alive pool to the configured Inference Gateway, path/format helpers, and the `x-llm-d-epp-profile` header constants. |
@@ -337,6 +337,60 @@ selection swaps in `header-profile-handler` for that one plugin.
 This is an alternative to the sidecar-based orchestration in llm-d-router; see
 [Coordinator vs. the llm-d-router sidecar model](#coordinator-vs-the-llm-d-router-sidecar-model)
 for the comparison.
+
+### Streaming SGLang prefill and decode
+
+Native SGLang `/generate` supports one attention DP rank per worker with `stream: true` and
+`sampling_params.n` absent or 1. Use the existing prefill and decode steps:
+
+```yaml
+pipeline:
+  kv_connector: kv-sglang
+  steps:
+    - type: prefill
+      params:
+        prefill_grace: 30s
+    - type: decode
+```
+
+Set `SGLANG_BOOTSTRAP_PORT` to the prefill worker's bootstrap service port.
+The Rust frontend serves bootstrap on its HTTP port (for example, 8000).
+
+On the gateway's prefill route, expose the worker address with Envoy's native
+[response header formatting](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/headers.html#custom-request-response-headers):
+
+```yaml
+response_headers_to_add:
+  - header:
+      key: x-llm-d-prefiller-host-port
+      value: "%UPSTREAM_HOST%"
+    append_action: OVERWRITE_IF_EXISTS_OR_ADD
+```
+
+Both coordinator gateway configurations, [single EPP](../deploy/environments/dev/coordinator-e2e-infra/envoy.yaml)
+and [three EPPs](../deploy/environments/dev/coordinator-e2e-infra/envoy-3-epp.yaml),
+include this header on the prefill route. Activate `sglanghttp-parser` in EPP.
+For a shared EPP, use `header-profile-handler` and the prefill/decode role filters.
+For Rust frontends without `/metrics`, use `endpoint-notification-source`,
+`inflight-load-producer`, and `concurrency-detector` instead of metric polling.
+Keep SGLang startup warmup enabled and use `/health` for readiness so the initial
+kernel compilation runs before the worker receives traffic.
+
+The KV connector creates a numeric `bootstrap_room` and `bootstrap_port` shared
+by both requests. SGLang starts the streaming response before generated frames
+are available. On receiving the response headers, the coordinator derives
+`bootstrap_host` from the endpoint header and starts decode with the bootstrap
+fields in the body. EPP selects the decode worker independently.
+
+Prefill drains concurrently with decode. Prefill transport errors and SGLang
+error events cancel decode.
+Client cancellation and decode HTTP or transport errors cancel prefill. Successful
+decode allows prefill up to `prefill_grace` to finish without delaying the client;
+later prefill failures are logged.
+Response buffering filters and upstream retries that can change the worker are
+unsupported.
+
+OpenAI APIs, rendering, and encode orchestration are unsupported for this flow.
 
 ### Cross-phase scheduling headers
 
