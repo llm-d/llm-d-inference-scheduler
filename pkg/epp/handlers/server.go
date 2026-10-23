@@ -921,6 +921,8 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 	if r.requestState == requestEvicted {
 		loggerTrace.Info("Sending ImmediateResponse for evicted request")
 		evicted := errcommon.Error{Code: errcommon.ResourceExhausted, Msg: "request evicted by flow control"}
+		// Counted by Process's deferred error metric.
+		r.responseStatusCode = evicted.Code
 		if r.requestDroppedReason != "" {
 			evicted.Headers = map[string]string{errcommon.RequestDroppedReasonHeaderKey: string(r.requestDroppedReason)}
 		}
