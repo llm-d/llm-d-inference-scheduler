@@ -19,6 +19,7 @@ package engineadapter
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -38,6 +39,10 @@ const maxDecodeDepth = 64
 
 // Limit hash processing because only the final bytes contribute to the hash.
 const maxDecodeHashBytes = 64
+
+// errUnknownVLLMEventTag is returned only after the event's fields are
+// consumed, so a batch decoder can continue with the next event.
+var errUnknownVLLMEventTag = errors.New("unknown vLLM event tag")
 
 type msgpackVLLMEventBatch struct {
 	timestamp        float64
@@ -69,6 +74,10 @@ func (b *msgpackVLLMEventBatch) DecodeMsgpack(dec *msgpack.Decoder) error {
 		b.events = make([]kvevents.GenericEvent, 0, min(eventCount, maxDecodePreallocate))
 		for range eventCount {
 			event, err := decodeVLLMEventFromDecoder(dec)
+			// Event types added by newer engines carry nothing the index uses.
+			if errors.Is(err, errUnknownVLLMEventTag) {
+				continue
+			}
 			if err != nil {
 				return fmt.Errorf("failed to decode vLLM event: %w", err)
 			}
@@ -149,7 +158,10 @@ func decodeArrayVLLMEvent(dec *msgpack.Decoder) (kvevents.GenericEvent, error) {
 		}
 		return &kvevents.AllBlocksClearedEvent{}, nil
 	default:
-		return nil, fmt.Errorf("unknown vLLM event tag: %s", tag)
+		if err := skipFields(dec, fieldCount-1); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: %s", errUnknownVLLMEventTag, tag)
 	}
 }
 
@@ -405,7 +417,7 @@ func decodeMapVLLMEvent(dec *msgpack.Decoder) (kvevents.GenericEvent, error) {
 	case eventTagAllBlocksCleared:
 		return &kvevents.AllBlocksClearedEvent{}, nil
 	default:
-		return nil, fmt.Errorf("unknown vLLM event tag: %s", fields.tag)
+		return nil, fmt.Errorf("%w: %s", errUnknownVLLMEventTag, fields.tag)
 	}
 }
 
