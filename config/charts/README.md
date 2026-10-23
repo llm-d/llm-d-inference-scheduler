@@ -283,6 +283,7 @@ kubectl wait --for=jsonpath='{.subsets[0].addresses[0].ip}' \
 | `router.epp.tolerations` | Tolerations for EPP pods. | `[]` |
 | `router.epp.podSecurityContext` | Pod-level `securityContext` for EPP pods, inherited by the EPP, proxy sidecar, and sidecar-mode latency predictor containers. | `{}` |
 | `router.epp.securityContext` | Container-level `securityContext` for the EPP container. | `{}` |
+| `router.epp.lifecycle` | Container lifecycle for the EPP container, rendered verbatim. Unset or null keeps the default preStop sleep of 5 seconds rendered on Kubernetes >= 1.30; an empty map (`{}`) disables the hook and renders no lifecycle. | `null` |
 | `router.epp.resources` | EPP container resource requests and limits. | `requests.cpu: "8"`, `requests.memory: 8Gi`, `limits.memory: 16Gi` |
 | `router.epp.pluginsConfigFile` | EPP plugins configuration file name. | `default-plugins.yaml` |
 | `router.epp.pluginsConfig` | Structured EPP configuration rendered into `pluginsConfigFile`. | `{}` |
@@ -727,7 +728,8 @@ Configures EPP to run with a proxy (Envoy proxy or Agentgateway proxy) that inte
 | `router.proxy.proxyType` | Type of proxy. Options: `[envoy, agentgateway]`. | `envoy` |
 | `router.proxy.mode` | Proxy deployment mode. `sidecar` runs the proxy in the EPP pod; `service` runs it as its own horizontally scalable Deployment and Service reaching EPP over the EPP Service. | `sidecar` |
 | `router.proxy.replicas` | Replica count for the proxy Deployment when `mode=service`. Ignored when `router.proxy.autoscaling.enabled` is `true`. | `2` |
-| `router.proxy.terminationGracePeriodSeconds` | Grace period (seconds) before SIGKILL on proxy pod teardown. Gives Envoy's 60s draining window time to complete and allows in-flight connections to drain. | `70` |
+| `router.proxy.terminationGracePeriodSeconds` | Grace period (seconds) before SIGKILL on the proxy pod. Applies in service mode only: in sidecar mode the proxy shares the EPP pod, so `router.epp.terminationGracePeriodSeconds` controls the grace period for both containers. Gives Envoy's 60s draining window time to complete and allows in-flight connections to drain. | `70` |
+| `router.proxy.lifecycle` | Container lifecycle for the proxy container, rendered verbatim in both sidecar and service mode. Unset or null keeps the default preStop sleep of 5 seconds rendered on Kubernetes >= 1.30; an empty map (`{}`) disables the hook and renders no lifecycle. For exec-based drains that outlast the default window, raise the grace period: `router.epp.terminationGracePeriodSeconds` in sidecar mode, `router.proxy.terminationGracePeriodSeconds` in service mode. | `null` |
 | `router.proxy.autoscaling.enabled` | Enable Horizontal Pod Autoscaler (HPA v2) for the proxy Deployment when `mode=service`. See [Standalone Proxy Autoscaling (Service Mode)](../../docs/operations.md#standalone-proxy-autoscaling-service-mode). | `false` |
 | `router.proxy.autoscaling.minReplicas` | Minimum number of proxy replicas for the HPA. | `1` |
 | `router.proxy.autoscaling.maxReplicas` | Maximum number of proxy replicas for the HPA. Must be greater than or equal to `minReplicas`. | `5` |

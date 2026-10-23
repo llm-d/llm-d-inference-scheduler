@@ -228,6 +228,8 @@ test_cases_llm_d_router_standalone["llm-d-router-gateway"]="--set router.inferen
 test_cases_llm_d_router_standalone["agentgateway"]="--set router.proxy.proxyType=agentgateway --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set 'router.modelServers.targetPorts[0].number=8000'"
 test_cases_llm_d_router_standalone["proxy-service"]="--set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set router.proxy.mode=service --set router.proxy.replicas=3"
 test_cases_llm_d_router_standalone["proxy-service-kubernetes-1.30"]="--kube-version 1.30.0 --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set router.proxy.mode=service"
+test_cases_llm_d_router_standalone["lifecycle-override"]="--set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set router.epp.lifecycle.preStop.exec.command[0]=/epp-drain --set router.proxy.lifecycle.preStop.exec.command[0]=/proxy-drain"
+test_cases_llm_d_router_standalone["lifecycle-override-service"]="--set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set router.proxy.mode=service --set router.proxy.lifecycle.preStop.exec.command[0]=/proxy-drain"
 test_cases_llm_d_router_standalone["proxy-autoscaling"]="--set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set router.proxy.mode=service --set router.proxy.autoscaling.enabled=true --set router.proxy.autoscaling.minReplicas=2 --set router.proxy.autoscaling.maxReplicas=6 --set router.proxy.autoscaling.targetCPUUtilizationPercentage=70"
 test_cases_llm_d_router_standalone["agentgateway-service"]="--set router.proxy.proxyType=agentgateway --set router.proxy.mode=service --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false --set 'router.modelServers.targetPorts[0].number=8000'"
 test_cases_llm_d_router_standalone["triton"]="--set router.modelServers.type=triton --set router.modelServers.matchLabels.app=llm-instance-gateway --set router.inferencePool.create=false"
@@ -269,6 +271,26 @@ for key in "${!test_cases_llm_d_router_standalone[@]}"; do
   if [ "${key}" == "tokenizer-python" ]; then
     if ! grep -q "vllm" "${output_dir}/llm-d-router-standalone/templates/epp.yaml" || ! grep -q "launch" "${output_dir}/llm-d-router-standalone/templates/epp.yaml"; then
       echo "Validation failed: vllm launch not found in rendered output for test: ${key}"
+      exit 1
+    fi
+  fi
+  if [ "${key}" == "lifecycle-override" ]; then
+    epp_yaml="${output_dir}/llm-d-router-standalone/templates/epp.yaml"
+    for hook in /epp-drain /proxy-drain; do
+      if ! grep -q -- "${hook}" "${epp_yaml}"; then
+        echo "Validation failed: lifecycle hook ${hook} not found in rendered output for test: ${key}"
+        exit 1
+      fi
+    done
+    if grep -q "seconds: 5" "${epp_yaml}"; then
+      echo "Validation failed: default preStop sleep rendered alongside a lifecycle override for test: ${key}"
+      exit 1
+    fi
+  fi
+  if [ "${key}" == "lifecycle-override-service" ]; then
+    epp_yaml="${output_dir}/llm-d-router-standalone/templates/epp.yaml"
+    if ! grep -q -- "/proxy-drain" "${epp_yaml}"; then
+      echo "Validation failed: proxy lifecycle override not found in service-mode render for test: ${key}"
       exit 1
     fi
   fi
