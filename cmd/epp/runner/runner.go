@@ -469,6 +469,7 @@ func (r *Runner) setup(ctx, servingCtx context.Context, cfg *rest.Config, opts *
 	metricsutil.SetFairnessIDLabelLimit(opts.FairnessIDMetricLabelLimit)
 	r.customCollectors = append(r.customCollectors, collectors.NewInferencePoolMetricsCollector(ds))
 	metrics.RegisterWithOptions(metricsRegisterOptions(rawConfig), r.customCollectors...)
+	metrics.InitFairnessIDResolutionMetrics(gknn.Name)
 	metrics.RecordInferenceExtensionInfo(version.CommitSHA, version.BuildRef)
 	// Register metrics handler.
 	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
@@ -1315,6 +1316,7 @@ func (r *Runner) runWithFileDiscovery(ctx context.Context, opts *runserver.Optio
 
 	r.customCollectors = append(r.customCollectors, collectors.NewInferencePoolMetricsCollector(ds))
 	metrics.RegisterWithOptions(metricsRegisterOptions(rawConfig), r.customCollectors...)
+	metrics.InitFairnessIDResolutionMetrics(poolName)
 	metrics.RecordInferenceExtensionInfo(version.CommitSHA, version.BuildRef)
 
 	setupLog.Info("EPP starting (file discovery mode)",
