@@ -50,6 +50,45 @@ func TestRedisIndexBehavior(t *testing.T) {
 	testCommonIndexBehavior(t, createRedisIndexForTesting)
 }
 
+func TestRedisClear_SkipsNonHashKeys(t *testing.T) {
+	server, err := miniredis.Run()
+	require.NoError(t, err)
+	defer server.Close()
+
+	index, err := NewRedisIndex(&RedisIndexConfig{Address: server.Addr()})
+	require.NoError(t, err)
+
+	ctx := t.Context()
+	keys := []BlockHash{111, 222}
+	target := PodEntry{PodIdentifier: "target", DeviceTier: "gpu"}
+	keeper := PodEntry{PodIdentifier: "keeper", DeviceTier: "gpu"}
+	require.NoError(t, index.Add(ctx, nil, keys, []PodEntry{target, keeper}))
+	require.NoError(t, server.Set("coord:revision:request-1", "v1"))
+
+	require.NoError(t, index.Clear(ctx, target.PodIdentifier))
+
+	for _, key := range keys {
+		result, err := index.Lookup(ctx, []BlockHash{key}, nil)
+		require.NoError(t, err)
+		require.Equal(t, []PodEntry{keeper}, result[key])
+	}
+	value, err := server.Get("coord:revision:request-1")
+	require.NoError(t, err)
+	require.Equal(t, "v1", value)
+}
+
+func TestRedisClear_ConnectionFailureReturnsError(t *testing.T) {
+	server, err := miniredis.Run()
+	require.NoError(t, err)
+
+	index, err := NewRedisIndex(&RedisIndexConfig{Address: server.Addr()})
+	require.NoError(t, err)
+
+	server.Close()
+
+	require.ErrorContains(t, index.Clear(t.Context(), "target"), "clear scan failed")
+}
+
 // TestRedisIndexEvictLookupFailure verifies that a lookup failure (e.g. lost
 // connectivity) is propagated instead of being reported as a successful no-op,
 // so callers and metrics do not treat a failed eviction as completed.
