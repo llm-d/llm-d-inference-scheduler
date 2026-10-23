@@ -516,6 +516,9 @@ func (r *Runner) setup(ctx, servingCtx context.Context, cfg *rest.Config, opts *
 	} else if err = runserver.SetupPluginStateDebugHandler(mgr, r.PluginHandle); err != nil {
 		setupLog.Error(err, "Failed to setup plugin state debug handler")
 		return nil, nil, err
+	} else if err = runserver.SetupDynamicLayoutHandlers(r.featureGates[runserver.DynamicPDFeatureGate], mgr, r.PluginHandle); err != nil {
+		setupLog.Error(err, "Failed to setup dynamic layout handlers")
+		return nil, nil, err
 	}
 
 	// --- Initialize Core EPP Components ---
@@ -871,6 +874,7 @@ func (r *Runner) parseConfigurationPhaseOne(ctx context.Context, opts *runserver
 
 	loader.RegisterFeatureGate(flowcontrol.FeatureGate, false)
 	loader.RegisterFeatureGate(runserver.HAPopulateNonLeaderDatastoreFeatureGate, true)
+	loader.RegisterFeatureGate(runserver.DynamicPDFeatureGate, false)
 
 	r.registerInTreePlugins()
 
