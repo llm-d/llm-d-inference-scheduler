@@ -50,3 +50,18 @@ func ParseGrpcPayload(data []byte) ([]byte, error) {
 	}
 	return data[gRPCPayloadHeaderLen : gRPCPayloadHeaderLen+msgLen], nil
 }
+
+// ParseGrpcPayloads extracts the message payload of every gRPC frame in data.
+// A streamed response can deliver several frames in one body chunk.
+func ParseGrpcPayloads(data []byte) ([][]byte, error) {
+	var payloads [][]byte
+	for len(data) > 0 {
+		payload, err := ParseGrpcPayload(data)
+		if err != nil {
+			return nil, err
+		}
+		payloads = append(payloads, payload)
+		data = data[gRPCPayloadHeaderLen+len(payload):]
+	}
+	return payloads, nil
+}
