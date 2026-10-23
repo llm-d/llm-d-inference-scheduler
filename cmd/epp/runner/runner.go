@@ -467,7 +467,7 @@ func (r *Runner) setup(ctx, servingCtx context.Context, cfg *rest.Config, opts *
 	// --- Setup Metrics Server ---
 	metricsutil.SetFairnessIDLabelLimit(opts.FairnessIDMetricLabelLimit)
 	r.customCollectors = append(r.customCollectors, collectors.NewInferencePoolMetricsCollector(ds))
-	metrics.Register(r.customCollectors...)
+	metrics.RegisterWithOptions(metricsRegisterOptions(rawConfig), r.customCollectors...)
 	metrics.RecordInferenceExtensionInfo(version.CommitSHA, version.BuildRef)
 	// Register metrics handler.
 	// Metrics endpoint is enabled in 'config/default/kustomization.yaml'. The Metrics options configure the server.
@@ -585,6 +585,22 @@ func (r *Runner) setup(ctx, servingCtx context.Context, cfg *rest.Config, opts *
 	readinessCheckers = append(readinessCheckers, r.dlRuntime)
 	r.healthGRPCServer = newHealthGRPCServer(ctrl.Log.WithName("health"), ds, isLeader, r.draining, opts.EnableLeaderElection, supporters, readinessCheckers)
 	return mgr, ds, nil
+}
+
+// metricsRegisterOptions maps the configuration file's metrics section onto the
+// metrics package. Both discovery paths call it with the same parsed config, and
+// both call it before registration because the histograms are built there and
+// are process-wide. The edges themselves are validated with the rest of the
+// configuration in pkg/epp/config/loader, so startup has already failed by here
+// if they are unusable.
+func metricsRegisterOptions(rawConfig *configapiv1.EndpointPickerConfig) metrics.RegisterOptions {
+	if rawConfig == nil || rawConfig.Metrics == nil {
+		return metrics.RegisterOptions{}
+	}
+	return metrics.RegisterOptions{
+		RequestTPOTBuckets: rawConfig.Metrics.RequestTPOTBuckets,
+		RequestITLBuckets:  rawConfig.Metrics.RequestITLBuckets,
+	}
 }
 
 // newMetricsServerOptions configures the EPP metrics server. OpenMetrics is
@@ -1293,7 +1309,7 @@ func (r *Runner) runWithFileDiscovery(ctx context.Context, opts *runserver.Optio
 	}
 
 	r.customCollectors = append(r.customCollectors, collectors.NewInferencePoolMetricsCollector(ds))
-	metrics.Register(r.customCollectors...)
+	metrics.RegisterWithOptions(metricsRegisterOptions(rawConfig), r.customCollectors...)
 	metrics.RecordInferenceExtensionInfo(version.CommitSHA, version.BuildRef)
 
 	setupLog.Info("EPP starting (file discovery mode)",

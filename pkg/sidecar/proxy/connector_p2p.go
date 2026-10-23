@@ -58,11 +58,13 @@ func (p *p2pPeer) String() string {
 // prefill request without it fails. source is the request body's
 // kv_transfer_params.remote_kv_source block, nil when absent or rejected. body
 // is the parsed request body the source was taken from, without the source;
-// nil when the dispatcher left the body unread.
+// nil when the dispatcher left the body unread. raw is body in its JSON wire
+// form, for callers that need bytes rather than the parsed map.
 type p2pRouting struct {
 	prefill *p2pPeer
 	source  *kvSource
 	body    map[string]any
+	raw     []byte
 }
 
 // kvSource is a validated kv_transfer_params.remote_kv_source block: the peer
@@ -77,15 +79,14 @@ func (k *kvSource) params() map[string]any {
 	return reqcommon.P2PPeerParams(k.kvRequestID, k.host, k.port)
 }
 
-// requestBody returns the parsed request body: the one the dispatcher read
-// for the pull source, or r's body read here when the dispatcher left it
-// unread.
-func (s *Server) requestBody(r *http.Request, w http.ResponseWriter, p2p p2pRouting) (map[string]any, bool) {
+// requestBody returns the request body as raw bytes and as the parsed map:
+// the ones the dispatcher read for the pull source, or r's body read here
+// when the dispatcher left it unread.
+func (s *Server) requestBody(r *http.Request, w http.ResponseWriter, p2p p2pRouting) ([]byte, map[string]any, bool) {
 	if p2p.body != nil {
-		return p2p.body, true
+		return p2p.raw, p2p.body, true
 	}
-	_, body, ok := s.readJSONBody(r, w)
-	return body, ok
+	return s.readJSONBody(r, w)
 }
 
 // handleP2P implements the vLLM OffloadingConnector P2P orchestration contract. The
@@ -102,10 +103,11 @@ func (s *Server) handleP2P(w http.ResponseWriter, r *http.Request, prefillPodHos
 		}
 		return
 	}
-	requestData, ok := s.requestBody(r, w, p2p)
+	original, requestData, ok := s.requestBody(r, w, p2p)
 	if !ok {
 		return
 	}
+	toolFields, _ := captureInferenceToolCallingRequest(r, apiType, original)
 
 	kvRequestID := newUUID()
 	kv := make([]any, 0, 8)
@@ -138,7 +140,7 @@ func (s *Server) handleP2P(w http.ResponseWriter, r *http.Request, prefillPodHos
 		return
 	}
 	if v := s.logger.V(logging.TRACE); v.Enabled() {
-		v.Info("prefill request body", logging.HTTPBodyKey, string(prefillBody))
+		v.Info("prefill request body", logBodyBytesKey, len(prefillBody))
 	}
 
 	// Decode request: pull KV from the prefiller's OffloadingConnector P2P tier. Original body
@@ -156,10 +158,10 @@ func (s *Server) handleP2P(w http.ResponseWriter, r *http.Request, prefillPodHos
 		return
 	}
 	if v := s.logger.V(logging.TRACE); v.Enabled() {
-		v.Info("decode request body", logging.HTTPBodyKey, string(decodeBody))
+		v.Info("decode request body", logBodyBytesKey, len(decodeBody))
 	}
 
-	s.handleP2PSequentialRequests(w, r, prefillBody, decodeBody, prefillPodHostPort)
+	s.handleP2PSequentialRequests(w, r, prefillBody, decodeBody, prefillPodHostPort, toolFields)
 }
 
 // handleP2PSequentialRequests runs the prefill request to completion, then
@@ -172,7 +174,8 @@ func (s *Server) handleP2P(w http.ResponseWriter, r *http.Request, prefillPodHos
 // recomputes the prompt locally, which is the work disaggregation exists to
 // avoid. Sequencing the requests also matches the NIXL connector, which forwards to
 // the prefiller and waits for it to return before dispatching decode.
-func (s *Server) handleP2PSequentialRequests(w http.ResponseWriter, r *http.Request, prefillBody, decodeBody []byte, prefillHost string) {
+func (s *Server) handleP2PSequentialRequests(w http.ResponseWriter, r *http.Request, prefillBody, decodeBody []byte, prefillHost string, toolFields *toolCallingRequest) {
+	defer toolFields.report(r.Context())
 	tracer := tracing.Tracer(tracerScope)
 	ctx := r.Context()
 
@@ -196,6 +199,7 @@ func (s *Server) handleP2PSequentialRequests(w http.ResponseWriter, r *http.Requ
 	prefillStart := time.Now()
 
 	pw := &bufferedResponseWriter{}
+	toolFields.compareDispatchedForSpan(prefillBody, prefillSpan)
 	prefillHandler.ServeHTTP(pw, cloneRequestWithBody(prefillCtx, r, prefillBody))
 	prefillDuration := time.Since(prefillStart)
 	metrics.RecordPrefillDuration(prefillDuration)
@@ -247,6 +251,7 @@ func (s *Server) handleP2PSequentialRequests(w http.ResponseWriter, r *http.Requ
 	decodeWriter, decodeStatus := captureResponseStatus(w)
 	decodeReturned := false
 	defer recordDecodeAbort(&decodeReturned, decodeStart)
+	toolFields.compareDispatchedForSpan(decodeBody, decodeSpan)
 	s.decoderProxy.ServeHTTP(decodeWriter, cloneRequestWithBody(decodeCtx, r, decodeBody))
 	decodeReturned = true
 
@@ -362,10 +367,14 @@ func parsePrefillP2P(logger logr.Logger, value string) *p2pPeer {
 // them. The sidecar owns the field, so client-supplied keys are dropped. It
 // routes through dispatchDecode so chunked decode still applies.
 func (s *Server) decodeWithP2PSource(w http.ResponseWriter, r *http.Request, p2p p2pRouting) {
-	requestData, ok := s.requestBody(r, w, p2p)
+	raw, requestData, ok := s.requestBody(r, w, p2p)
 	if !ok {
 		return
 	}
+	apiType := reqcommon.DetectAPIType(r.URL.Path)
+	toolFields, _ := captureInferenceToolCallingRequest(r, apiType, raw)
+	defer toolFields.report(r.Context())
+
 	source := p2p.source
 	requestData[reqcommon.FieldKVTransferParams] = map[string]any{reqcommon.FieldRemoteKVSource: source.params()}
 
@@ -381,8 +390,8 @@ func (s *Server) decodeWithP2PSource(w http.ResponseWriter, r *http.Request, p2p
 		return
 	}
 	if v := s.logger.V(logging.TRACE); v.Enabled() {
-		v.Info("decoder request body with p2p source", logging.HTTPBodyKey, string(newBody))
+		v.Info("decoder request body with p2p source", logBodyBytesKey, len(newBody))
 	}
 
-	s.dispatchDecode(w, cloneRequestWithBody(r.Context(), r, newBody), requestData)
+	s.dispatchDecode(w, cloneRequestWithBody(r.Context(), r, newBody), requestData, newBody, toolFields)
 }
