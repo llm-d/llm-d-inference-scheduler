@@ -125,6 +125,7 @@ func RegisterWithOptions(opts RegisterOptions, customCollectors ...prometheus.Co
 		metrics.Registry.MustRegister(llmdFlowControlPendingReclaim)
 		metrics.Registry.MustRegister(llmdFlowControlRevocationConfirmationDuration)
 		metrics.Registry.MustRegister(llmdInferenceModelRewriteDecisionsTotal)
+		metrics.Registry.MustRegister(LlmdDataLayerCollectorDispatchesTotal)
 		metrics.Registry.MustRegister(LlmdDataLayerPollErrorsTotal)
 		metrics.Registry.MustRegister(LlmdDataLayerExtractErrorsTotal)
 		metrics.Registry.MustRegister(llmdToolCallingFieldStatusTotal)
@@ -183,6 +184,7 @@ func Reset() {
 	llmdFlowControlPendingReclaim.Reset()
 	llmdFlowControlRevocationConfirmationDuration.Reset()
 	llmdInferenceModelRewriteDecisionsTotal.Reset()
+	LlmdDataLayerCollectorDispatchesTotal.Reset()
 	LlmdDataLayerPollErrorsTotal.Reset()
 	LlmdDataLayerExtractErrorsTotal.Reset()
 	llmdToolCallingFieldStatusTotal.Reset()
@@ -690,6 +692,15 @@ func DeleteFlowControlFlowSeries(fairnessID, priority string) {
 func RecordInferenceModelRewriteDecision(modelRewriteName, modelName, targetModel string) {
 	modelName = boundModel(modelName)
 	llmdInferenceModelRewriteDecisionsTotal.WithLabelValues(modelRewriteName, modelName, targetModel).Inc()
+}
+
+// RecordDataLayerCollectorDispatch increments the dispatch counter for a source outcome.
+func RecordDataLayerCollectorDispatch(sourceType string, success bool) {
+	outcome := "error"
+	if success {
+		outcome = "success"
+	}
+	LlmdDataLayerCollectorDispatchesTotal.WithLabelValues(sourceType, outcome).Inc()
 }
 
 // RecordDataLayerPollError increments the poll error counter for a source type.

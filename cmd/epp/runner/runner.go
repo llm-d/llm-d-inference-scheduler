@@ -870,6 +870,7 @@ func (r *Runner) parseConfigurationPhaseOne(ctx context.Context, opts *runserver
 	}
 
 	loader.RegisterFeatureGate(flowcontrol.FeatureGate, false)
+	loader.RegisterFeatureGate(datalayer.CollectorMetricsFeatureGate, false)
 	loader.RegisterFeatureGate(runserver.HAPopulateNonLeaderDatastoreFeatureGate, true)
 
 	r.registerInTreePlugins()
