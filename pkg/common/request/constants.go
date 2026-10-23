@@ -104,6 +104,7 @@ const (
 // under input_tokens_details. total_tokens is named the same in every API.
 const (
 	FieldUsage               = "usage"
+	FieldResponse            = "response" // streamed Responses events nest the response object, and its usage, under this key
 	FieldPromptTokens        = "prompt_tokens"
 	FieldCompletionTokens    = "completion_tokens"
 	FieldInputTokens         = "input_tokens"
