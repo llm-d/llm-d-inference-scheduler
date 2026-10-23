@@ -261,6 +261,12 @@ func (s *Server) runChunkedDecodeFromMap(w http.ResponseWriter, r *http.Request,
 			span.SetStatus(codes.Error, "chunk decode failed")
 			maps.Copy(w.Header(), bw.headers)
 			w.WriteHeader(bw.statusCode)
+			if streamingEnabled && chunkIndex > 0 {
+				// The status went out with the first chunk, so the error is sent the
+				// way vLLM reports a failure in a stream: as a data event before [DONE].
+				fmt.Fprintf(w, "%s%s\n\n%s\n\n", reqcommon.SSEDataPrefix, bw.bodyBytes(), reqcommon.SSEDone)
+				return
+			}
 			WriteAll(w, bw.bodyBytes())
 			return
 		}

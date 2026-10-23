@@ -485,6 +485,34 @@ var _ = Describe("Chunked Decode", func() {
 
 	Describe("streaming", func() {
 
+		It("ends the stream with an error event when a later chunk fails", func() {
+			errorBody := `{"error":{"message":"maximum context length exceeded","type":"BadRequestError","param":null,"code":400}}`
+			calls := 0
+			ti := newChunkedTestSetupWithHandler(5, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				w.Header().Set("Content-Type", "application/json")
+				if calls == 1 {
+					fmt.Fprint(w, chatResponse("hello ", finishReasonLength, 5, 5))
+					return
+				}
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprint(w, errorBody)
+			}))
+			defer ti.stop()
+
+			resp := doPost(ti.addr,
+				`{"messages":[{"role":"user","content":"Hi"}],"max_tokens":20,"stream":true}`)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+			body, err := io.ReadAll(resp.Body)
+			Expect(err).ToNot(HaveOccurred())
+
+			events := strings.Split(strings.TrimSuffix(string(body), "\n\n"), "\n\n")
+			Expect(events).To(HaveLen(3))
+			Expect(events[0]).To(HavePrefix(reqcommon.SSEDataPrefix))
+			Expect(events[1]).To(Equal(reqcommon.SSEDataPrefix + errorBody))
+			Expect(events[2]).To(Equal(reqcommon.SSEDone))
+		})
+
 		It("emits one SSE event per chunk and terminates with [DONE]", func() {
 			ti := newChunkedTestSetup(5, []string{
 				chatResponse("hello ", "length", 5, 5),
