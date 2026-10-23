@@ -1,5 +1,6 @@
 from contextlib import ExitStack
 import copy
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -442,6 +443,94 @@ class PercentileTests(unittest.TestCase):
         self.assertEqual(perf.calculate_percentiles(before, after), (0.625, 10.0, 10.0))
 
 
+class MeanLatencyTests(unittest.TestCase):
+    def test_mean_from_sum_and_count_deltas_in_milliseconds(self):
+        before = {"count": 100, "sum": 0.5, "buckets": {}}
+        after = {"count": 300, "sum": 1.5, "buckets": {}}
+        self.assertAlmostEqual(perf.calculate_mean_latency(before, after), 5.0)
+
+    def test_missing_metrics_or_no_events_return_zero(self):
+        before, after = scheduler_metrics()
+        for first, second in ((None, after), (before, None), (before, before)):
+            with self.subTest(before=first, after=second):
+                self.assertEqual(perf.calculate_mean_latency(first, second), 0.0)
+
+
+class ProvenanceParsingTests(unittest.TestCase):
+    def test_epp_info_commit_with_any_label_order(self):
+        for line in (
+            'llm_d_epp_info{build_ref="main",commit="abc123"} 1',
+            'llm_d_epp_info{commit="abc123",build_ref="main"} 1',
+            'llm_d_router_epp_info{build_ref="main",commit="abc123"} 1',
+        ):
+            with self.subTest(line=line):
+                self.assertEqual(perf.parse_epp_info_commit(line), "abc123")
+
+    def test_epp_info_without_commit_label_is_empty(self):
+        self.assertEqual(perf.parse_epp_info_commit('llm_d_epp_info{build_ref="main"} 1'), "")
+
+    def test_other_metrics_are_not_epp_info(self):
+        self.assertIsNone(perf.parse_epp_info_commit("llm_d_epp_scheduler_e2e_duration_seconds_count 5"))
+
+    def test_container_image_ids(self):
+        output = "epp=ghcr.io/llm-d/epp@sha256:aaa\nenvoy-proxy=docker.io/envoyproxy/envoy@sha256:bbb\n"
+        self.assertEqual(
+            perf.parse_container_image_ids(output),
+            {
+                "epp": "ghcr.io/llm-d/epp@sha256:aaa",
+                "envoy-proxy": "docker.io/envoyproxy/envoy@sha256:bbb",
+            },
+        )
+
+    def test_empty_image_id_output(self):
+        self.assertEqual(perf.parse_container_image_ids(""), {})
+
+
+class RunRecordTests(OfflineTestCase):
+    def record(self, **overrides):
+        values = dict(
+            test_name="optimized-baseline-job1",
+            started_at="2026-10-19T09:00:00Z",
+            ns="llm-d-perf-1",
+            status="SUCCESS",
+            setup={"router_config": "test/perf/config/router.yaml", "sim_replicas": 10},
+            epp_commit="abc123",
+            images=["epp:main"],
+            image_ids={"epp": "epp@sha256:aaa"},
+            idle_metrics={"epp": {"cpu": 10, "mem": 20}},
+            peak_metrics={"epp": {"cpu": 30, "mem": 40}, "TOTAL": {"cpu": 50, "mem": 60}},
+            latency={"p50": 1.0, "p95": 2.0, "p99": 3.0, "mean": 1.5},
+        )
+        values.update(overrides)
+        return perf.build_run_record(**values)
+
+    def test_record_contents(self):
+        record = self.record()
+        self.assertEqual(record["schema_version"], perf.RUN_RECORD_SCHEMA_VERSION)
+        self.assertEqual(record["provenance"]["epp_commit"], "abc123")
+        self.assertEqual(record["provenance"]["image_ids"], {"epp": "epp@sha256:aaa"})
+        self.assertEqual(
+            record["containers"]["epp"],
+            {"idle_cpu_m": 10, "idle_mem_mib": 20, "peak_cpu_m": 30, "peak_mem_mib": 40},
+        )
+        self.assertEqual(record["containers"]["TOTAL"]["idle_cpu_m"], None)
+        self.assertEqual(record["scheduler_latency_ms"]["mean"], 1.5)
+
+    def test_record_is_written_under_runs_by_test_name(self):
+        path = perf.write_run_record(str(self.directory), self.record())
+        self.assertEqual(
+            Path(path),
+            self.directory / "runs" / "optimized-baseline-job1" / "20261019T090000Z.json",
+        )
+        self.assertEqual(json.loads(Path(path).read_text()), self.record())
+
+    def test_paths_inside_the_repo_are_made_relative(self):
+        repo = str(self.directory)
+        inside = os.path.join(repo, "test", "perf", "job.yaml")
+        self.assertEqual(perf.repo_relative_path(inside, repo), os.path.join("test", "perf", "job.yaml"))
+        self.assertEqual(perf.repo_relative_path("/elsewhere/job.yaml", repo), "/elsewhere/job.yaml")
+
+
 class MarkdownReportTests(OfflineTestCase):
     def write_report(self, **kwargs):
         perf.write_results_to_markdown_folder(
@@ -534,6 +623,11 @@ class MainWiringTests(OfflineTestCase):
         )
         self.contexts.enter_context(
             mock.patch.object(
+                perf, "get_container_image_ids", return_value={"epp": "epp@sha256:aaa"}
+            )
+        )
+        self.contexts.enter_context(
+            mock.patch.object(
                 perf, "sample_resources", return_value={"epp": {"cpu": 1, "mem": 2}}
             )
         )
@@ -563,6 +657,17 @@ class MainWiringTests(OfflineTestCase):
         writer.assert_called_once()
         self.assertAlmostEqual(writer.call_args.args[13], 91.0)
         self.assertEqual(writer.call_args.args[14], "SUCCESS")
+        records = list((self.directory / "runs" / "optimized-baseline-job1").glob("*.json"))
+        self.assertEqual(len(records), 1)
+        record = json.loads(records[0].read_text())
+        self.assertEqual(record["status"], "SUCCESS")
+        self.assertEqual(record["provenance"]["image_ids"], {"epp": "epp@sha256:aaa"})
+        self.assertAlmostEqual(record["scheduler_latency_ms"]["p99"], 91.0)
+        self.assertEqual(record["setup"]["epp_log_verbosity"], perf.EPP_LOG_VERBOSITY)
+        self.assertEqual(
+            record["setup"]["router_config"],
+            os.path.join("test", "perf", "config", "router-configs", "optimized-baseline.yaml"),
+        )
 
 
 if __name__ == "__main__":
