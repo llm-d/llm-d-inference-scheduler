@@ -794,10 +794,14 @@ type requestIntegrityDirector struct {
 	err                error
 	called             bool
 	checkInboundBuffer func()
+	checkSnapshot      func(context.Context, []byte)
 }
 
-func (d *requestIntegrityDirector) HandleRequest(_ context.Context, reqCtx *RequestContext, _ *fwkrh.InferenceRequestBody) (*RequestContext, error) {
+func (d *requestIntegrityDirector) HandleRequest(ctx context.Context, reqCtx *RequestContext, _ *fwkrh.InferenceRequestBody) (*RequestContext, error) {
 	d.called = true
+	if d.checkSnapshot != nil {
+		d.checkSnapshot(ctx, reqCtx.Request.RawBody)
+	}
 	if d.outbound != "" {
 		if d.inPlace {
 			copy(reqCtx.Request.RawBody, d.outbound)
@@ -1136,6 +1140,17 @@ func TestProcessRequestToolCallingIntegrity(t *testing.T) {
 				checkInboundBuffer: func() {
 					require.Equal(t, tt.body, requestBuffer.String(), "inbound buffer must remain intact through Director processing")
 				},
+			}
+			if tt.wantSurface != "" && tt.wantDirector {
+				apiType, ok := toolCallingAPIForPath(tt.path)
+				require.True(t, ok)
+				director.checkSnapshot = func(ctx context.Context, body []byte) {
+					got, ok := toolcalling.RequestSnapshotForBody(ctx, apiType, body)
+					require.True(t, ok)
+					want, err := toolcalling.CaptureRequestJSON(apiType, []byte(tt.body))
+					require.NoError(t, err)
+					require.Equal(t, want.Summary(), got.Summary())
+				}
 			}
 			bodySplit := len(tt.body) / 2
 			srv := &scriptedProcessServer{

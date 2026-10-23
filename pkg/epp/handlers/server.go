@@ -642,6 +642,9 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				if s.toolCallingTelemetryEnabled {
 					ctx = toolcalling.WithTelemetryEnabled(ctx)
 				}
+				if hasInboundToolSnapshot {
+					ctx = toolcalling.WithRequestSnapshot(ctx, inboundBody, inboundToolSnapshot)
+				}
 				reqCtx, err = s.director.HandleRequest(ctx, reqCtx, parseResult.Body)
 				// The Director may resolve agent identity after this request span opened.
 				tracing.AttributeRequest(ctx, span)
