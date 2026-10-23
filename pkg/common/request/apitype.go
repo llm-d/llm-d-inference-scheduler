@@ -31,6 +31,11 @@ const (
 	PathSGLangGenerate  = "/generate"
 )
 
+// APISurface identifies a generation API for observability. Its zero value is unknown.
+type APISurface int
+
+const APISurfaceUnknown APISurface = 0
+
 // APIType is the inference API a request was sent to. Path and the output
 // token cap treat a value outside the constants below as
 // APITypeChatCompletions; String reports it as APIType(N).
@@ -71,6 +76,26 @@ func (a APIType) String() string {
 	}
 }
 
+// Surface returns the API's observability identity.
+func (a APIType) Surface() APISurface {
+	switch a {
+	case APITypeChatCompletions, APITypeCompletions, APITypeResponses,
+		APITypeVLLMGenerate, APITypeSGLangGenerate, APITypeMessages:
+		return APISurface(a + 1)
+	default:
+		return APISurfaceUnknown
+	}
+}
+
+// String returns a bounded API name, including for unsupported values.
+func (s APISurface) String() string {
+	apiType := APIType(s - 1)
+	if apiType.Surface() == APISurfaceUnknown {
+		return "unknown"
+	}
+	return apiType.String()
+}
+
 func (a APIType) Path() string {
 	switch a {
 	case APITypeCompletions:
@@ -108,6 +133,24 @@ func DetectAPIType(path string) APIType {
 	default:
 		return APITypeChatCompletions
 	}
+}
+
+// DetectAPISurface returns a bounded generation API name for observability.
+// Auxiliary endpoints and missing paths are unknown rather than a routing default.
+func DetectAPISurface(path string) APISurface {
+	path, _, _ = strings.Cut(path, "?")
+	path = strings.TrimSuffix(strings.TrimSpace(path), "/")
+	for _, apiType := range []APIType{
+		APITypeChatCompletions, APITypeCompletions, APITypeResponses,
+		APITypeMessages, APITypeVLLMGenerate, APITypeSGLangGenerate,
+	} {
+		// Keep the slash boundary while allowing provider-specific prefixes.
+		suffix := strings.TrimPrefix(apiType.Path(), "/v1")
+		if strings.HasSuffix(path, suffix) {
+			return apiType.Surface()
+		}
+	}
+	return APISurfaceUnknown
 }
 
 // JSON request field names that cap output tokens, by API. Chat completions caps

@@ -71,6 +71,64 @@ func TestDetectAPIType(t *testing.T) {
 	}
 }
 
+func TestDetectAPISurface(t *testing.T) {
+	tests := []struct {
+		name, path, want string
+	}{
+		{"chat completions", PathChatCompletions, "chat_completions"},
+		{"completions", PathCompletions, "completions"},
+		{"responses", PathResponses, "responses"},
+		{"responses trailing slash and query", PathResponses + "/?stream=true", "responses"},
+		{"prefixed responses", "/provider/model" + PathResponses, "responses"},
+		{"responses item read", PathResponses + "/resp_123", "unknown"},
+		{"responses item read trailing slash and query", PathResponses + "/resp_123/?include=output", "unknown"},
+		{"prefixed responses item read", "/provider/model" + PathResponses + "/resp_123", "unknown"},
+		{"messages", PathMessages, "messages"},
+		{"vllm generate", PathVLLMGenerate, "vllm_generate"},
+		{"sglang generate", PathSGLangGenerate, "sglang_generate"},
+		{"provider prefix", "/provider/model" + PathMessages, "messages"},
+		{"unversioned provider route", "/provider/messages", "messages"},
+		{"trailing slash and query", PathMessages + "/?beta=true", "messages"},
+		{"unknown", "/v1/embeddings", "unknown"},
+		{"missing", "", "unknown"},
+		{"token counting", PathMessages + "/count_tokens", "unknown"},
+		{"render", PathMessages + "/render", "unknown"},
+		{"extra path segment", PathChatCompletions + "/extra", "unknown"},
+		{"substring", "/v1/messages-extra", "unknown"},
+		{"missing segment boundary", "/provider/notmessages", "unknown"},
+		{"query is not path", "/health?target=" + PathMessages, "unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := DetectAPISurface(tt.path).String(); got != tt.want {
+				t.Errorf("DetectAPISurface(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAPISurfaceString(t *testing.T) {
+	var zero APISurface
+	for _, surface := range []APISurface{zero, APISurfaceUnknown, APISurface(-1), APISurface(1000)} {
+		if got := surface.String(); got != "unknown" {
+			t.Errorf("APISurface(%d).String() = %q, want unknown", surface, got)
+		}
+	}
+	for _, apiType := range []APIType{
+		APITypeChatCompletions, APITypeCompletions, APITypeResponses,
+		APITypeVLLMGenerate, APITypeSGLangGenerate, APITypeMessages,
+	} {
+		if got := apiType.Surface().String(); got != apiType.String() {
+			t.Errorf("%v surface = %q, want %q", apiType, got, apiType.String())
+		}
+	}
+	for _, apiType := range []APIType{APIType(-1), APIType(1000)} {
+		if got := apiType.Surface(); got != APISurfaceUnknown {
+			t.Errorf("%v surface = %v, want unknown", apiType, got)
+		}
+	}
+}
+
 func TestAPIType_tokenLimitFields(t *testing.T) {
 	cases := map[APIType][]string{
 		APITypeChatCompletions: {FieldMaxTokens, FieldMaxCompletionTokens},

@@ -43,6 +43,7 @@ import (
 	"github.com/llm-d/llm-d-router/pkg/common/envoy"
 	errcommon "github.com/llm-d/llm-d-router/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-router/pkg/common/observability/logging"
+	"github.com/llm-d/llm-d-router/pkg/common/observability/semconv"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/toolcalling"
 	"github.com/llm-d/llm-d-router/pkg/common/observability/tracing"
 	reqcommon "github.com/llm-d/llm-d-router/pkg/common/request"
@@ -169,6 +170,7 @@ type RequestContext struct {
 	FlowControlQueueDuration time.Duration
 
 	// Lifecycle bookkeeping.
+	apiSurface                 reqcommon.APISurface
 	firstTokenTimestamp        time.Time
 	lastChunkReceivedTimestamp time.Time
 	responseCompleteTimestamp  time.Time
@@ -269,6 +271,11 @@ func (s *StreamingServer) getOrResolveParser(reqCtx *RequestContext) (fwkrh.Pars
 
 	reqCtx.Parser = parser
 	return parser, nil
+}
+
+// APISurface returns the generation API captured at ingress.
+func (r *RequestContext) APISurface() reqcommon.APISurface {
+	return r.apiSurface
 }
 
 // apiType classifies the request by its path. A request rejected before its
@@ -398,6 +405,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 	// See https://github.com/envoyproxy/envoy/issues/17540.
 	reqCtx := &RequestContext{
 		requestState: requestReceived,
+		apiSurface:   reqcommon.APISurfaceUnknown,
 		Request: &Request{
 			Headers:  make(map[string]string),
 			Metadata: make(map[string]any),
@@ -419,7 +427,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 	// Flow-control rejections carry the queue wait and are the slowest samples;
 	// dropping them would bias the histogram low.
 	recordRequestProcessing := sync.OnceFunc(func() {
-		metrics.RecordRequestProcessingLatency(time.Since(reqCtx.RequestReceivedTimestamp))
+		metrics.RecordRequestProcessingLatency(reqCtx.apiSurface, time.Since(reqCtx.RequestReceivedTimestamp))
 	})
 
 	// Record EPP response processing latency once when the stream ends. Using a
@@ -429,7 +437,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 	// requests that never reached the response phase.
 	defer func() {
 		if reqCtx.responseProcessingDuration > 0 {
-			metrics.RecordResponseProcessingLatency(reqCtx.responseProcessingDuration)
+			metrics.RecordResponseProcessingLatency(reqCtx.apiSurface, reqCtx.responseProcessingDuration)
 		}
 	}()
 
@@ -482,9 +490,9 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 		}
 		fairnessID, priority := extractFairnessAndPriority(reqCtx)
 		if reqCtx.responseStatusCode != "" {
-			metrics.RecordRequestErrCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, fairnessID, priority, reqCtx.responseStatusCode)
+			metrics.RecordRequestErrCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.apiSurface, fairnessID, priority, reqCtx.responseStatusCode)
 		} else if err != nil {
-			metrics.RecordRequestErrCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, fairnessID, priority, errcommon.CanonicalCode(err))
+			metrics.RecordRequestErrCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.apiSurface, fairnessID, priority, errcommon.CanonicalCode(err))
 		}
 		if span != nil {
 			if err != nil {
@@ -495,7 +503,7 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			}
 		}
 		if reqCtx.requestRunning {
-			metrics.DecRunningRequests(reqCtx.IncomingModelName, reqCtx.TargetModelName, fairnessID, priority)
+			metrics.DecRunningRequests(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.apiSurface, fairnessID, priority)
 		}
 
 		// If we scheduled a pod (TargetPod != nil) but never marked the response  as complete (e.g. error, disconnect,
@@ -551,6 +559,8 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 
 		switch v := req.Request.(type) {
 		case *extProcPb.ProcessingRequest_RequestHeaders:
+			// Capture the client API before routing or rendering can rewrite the path.
+			reqCtx.apiSurface = reqcommon.DetectAPISurface(envoy.ExtractHeaderValue(v, ":path"))
 			reqCtx.Request.ID = uuid.NewString()
 			requestID := envoy.ExtractHeaderValue(v, reqcommon.RequestIDHeaderKey)
 			if len(requestID) == 0 {
@@ -566,7 +576,10 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 			// headers, then start it. The headers are only available here, so the span
 			// cannot be started at the top of Process without orphaning the trace.
 			ctx = extractTraceContext(ctx, v)
-			ctx, span = tracer.Start(ctx, "request", trace.WithSpanKind(trace.SpanKindServer))
+			ctx, span = tracer.Start(ctx, "request",
+				trace.WithSpanKind(trace.SpanKindServer),
+				trace.WithAttributes(semconv.LLMDEPPAPISurface(reqCtx.apiSurface.String())),
+			)
 
 			// Tag every log line of this request with the trace it belongs to.
 			ctx = tracing.LoggerWithSpanContext(ctx, span)
@@ -685,8 +698,8 @@ func (s *StreamingServer) Process(srv extProcPb.ExternalProcessor_ProcessServer)
 				reqCtx.reqHeaderResp = s.generateRequestHeaderResponse(ctx, reqCtx)
 				reqCtx.reqBodyResp = envoy.GenerateRequestBodyResponses(reqCtx.Request.RawBody)
 				fairnessID, priority := extractFairnessAndPriority(reqCtx)
-				metrics.RecordRequestCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, fairnessID, reqCtx.Priority)
-				metrics.RecordRequestSizes(reqCtx.IncomingModelName, reqCtx.TargetModelName, fairnessID, priority, reqCtx.RequestSize)
+				metrics.RecordRequestCounter(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.apiSurface, fairnessID, reqCtx.Priority)
+				metrics.RecordRequestSizes(reqCtx.IncomingModelName, reqCtx.TargetModelName, reqCtx.apiSurface, fairnessID, priority, reqCtx.RequestSize)
 
 				if parseResult.SkipResponseProcessing {
 					reqCtx.requestState = requestResponseProcessingSkipped
@@ -977,7 +990,7 @@ func (r *RequestContext) updateStateAndSendIfNeeded(srv extProcPb.ExternalProces
 		logger.V(logutil.DEFAULT).Info("EPP sent request body response(s) to proxy", "modelName", r.IncomingModelName, "targetModelName", r.TargetModelName)
 		r.requestState = bodyRequestResponsesComplete
 		fairnessID, priority := extractFairnessAndPriority(r)
-		metrics.IncRunningRequests(r.IncomingModelName, r.TargetModelName, fairnessID, priority)
+		metrics.IncRunningRequests(r.IncomingModelName, r.TargetModelName, r.apiSurface, fairnessID, priority)
 		r.requestRunning = true
 		// Dump the response so a new stream message can begin
 		r.reqBodyResp = nil
