@@ -224,6 +224,71 @@ func newMockDataProducerPlugin(name string) *mockDataProducerPlugin {
 	}
 }
 
+// requestStateProducer keeps per-request state between Produce and PreRequest, as the
+// prefix-cache and multimodal producers do, so a test can observe which of the two
+// release paths the director takes.
+type requestStateProducer struct {
+	name string
+
+	mu        sync.Mutex
+	held      map[string]struct{}
+	released  int
+	abandoned int
+}
+
+func newRequestStateProducer(name string) *requestStateProducer {
+	return &requestStateProducer{name: name, held: map[string]struct{}{}}
+}
+
+func (p *requestStateProducer) TypedName() fwkplugin.TypedName {
+	return fwkplugin.TypedName{Type: "mock-request-state", Name: p.name}
+}
+
+func (p *requestStateProducer) Produces() map[fwkplugin.DataKey]any {
+	return map[fwkplugin.DataKey]any{mockProducedDataKey: 0}
+}
+
+func (p *requestStateProducer) Produce(_ context.Context, request *fwksched.InferenceRequest, _ []fwksched.Endpoint) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.held[request.RequestID] = struct{}{}
+	return nil
+}
+
+func (p *requestStateProducer) PreRequest(_ context.Context, request *fwksched.InferenceRequest, _ *fwksched.SchedulingResult) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.held, request.RequestID)
+	p.released++
+	return nil
+}
+
+func (p *requestStateProducer) RequestAbandoned(_ context.Context, request *fwksched.InferenceRequest) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.held, request.RequestID)
+	p.abandoned++
+}
+
+// counts returns the number of PreRequest and RequestAbandoned releases observed.
+func (p *requestStateProducer) counts() (released, abandoned int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.released, p.abandoned
+}
+
+// heldIDs returns the request IDs whose state the producer still holds.
+func (p *requestStateProducer) heldIDs() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	ids := make([]string, 0, len(p.held))
+	for id := range p.held {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 type mockAdmissionPlugin struct {
 	typedName   fwkplugin.TypedName
 	denialError error
@@ -2345,6 +2410,98 @@ func TestDirector_ReleasesDispatchReservationAfterPreRequest(t *testing.T) {
 	_, err = dir.HandleRequest(ctx, reqCtx, parseResult.Body)
 	require.NoError(t, err)
 	require.True(t, released)
+}
+
+// TestDirector_ReleasesProducerStateOnEarlyReturn verifies that per-request state a DataProducer
+// writes in Produce is released before HandleRequest returns when the request never reaches
+// PreRequest, and that PreRequest owns the release on the paths that do reach it.
+func TestDirector_ReleasesProducerStateOnEarlyReturn(t *testing.T) {
+	scheduleResult := &fwksched.SchedulingResult{
+		PrimaryProfileName: "decode",
+		ProfileResults: map[string]*fwksched.ProfileRunResult{
+			"decode": {TargetEndpoints: []fwksched.Endpoint{fwksched.NewEndpoint(&fwkdl.EndpointMetadata{
+				Address: "192.168.1.100",
+				Port:    "8000",
+				ID:      types.NamespacedName{Name: "pod1", Namespace: "default"},
+			}, nil, fwkdl.NewAttributes())}},
+		},
+	}
+
+	tests := []struct {
+		name          string
+		admitError    error
+		scheduleError error
+		preRequestErr error
+		wantReleased  int
+		wantAbandoned int
+	}{
+		{
+			name:          "admission denial releases state through RequestAbandoned",
+			admitError:    errors.New("endpoint cannot be admitted"),
+			wantAbandoned: 1,
+		},
+		{
+			name:          "scheduler error releases state through RequestAbandoned",
+			scheduleError: errors.New("no endpoint available"),
+			wantAbandoned: 1,
+		},
+		{
+			name:          "PreRequest error releases state through PreRequest and RequestAbandoned",
+			preRequestErr: errors.New("pre request failed"),
+			wantReleased:  1,
+			wantAbandoned: 1,
+		},
+		{
+			name:         "successful request releases state through PreRequest only",
+			wantReleased: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir, ctx := newSinglePodDirector(t, scheduleResult)
+			if tt.scheduleError != nil {
+				dir.scheduler = &mockScheduler{scheduleErr: tt.scheduleError}
+			}
+			producer := newRequestStateProducer("state")
+			preRequest := []fwkrc.PreRequest{producer}
+			if tt.preRequestErr != nil {
+				preRequest = append(preRequest, &mockPreRequestPlugin{name: "fail-pre-request", err: tt.preRequestErr})
+			}
+			dir.requestControlPlugins = *NewConfig().
+				WithAdmissionPlugins(newMockAdmissionPlugin("admit", tt.admitError)).
+				WithDataProducerPlugins(producer).
+				WithPreRequestPlugins(preRequest...)
+
+			body, err := json.Marshal(map[string]any{"model": "m", "prompt": "p"})
+			require.NoError(t, err)
+			reqCtx := &handlers.RequestContext{
+				Request: &handlers.Request{
+					ID: "abandoned-request",
+					Headers: map[string]string{
+						reqcommon.RequestIDHeaderKey: "abandoned-request",
+						":path":                      "/v1/completions",
+					},
+					RawBody: body,
+				},
+				Parser: openai.NewOpenAIParser(),
+			}
+			parseResult, err := reqCtx.Parser.ParseRequest(ctx, body, reqCtx.Request.Headers)
+			require.NoError(t, err)
+
+			_, handleErr := dir.HandleRequest(ctx, reqCtx, parseResult.Body)
+			if tt.admitError != nil || tt.scheduleError != nil || tt.preRequestErr != nil {
+				require.Error(t, handleErr)
+			} else {
+				require.NoError(t, handleErr)
+			}
+
+			require.Empty(t, producer.heldIDs(), "per-request state must not outlive HandleRequest")
+			released, abandoned := producer.counts()
+			require.Equal(t, tt.wantReleased, released, "PreRequest releases")
+			require.Equal(t, tt.wantAbandoned, abandoned, "RequestAbandoned calls")
+		})
+	}
 }
 
 // TestDirector_SharedRequestIDHeaderReleasesInFlightLoad verifies that two
