@@ -344,8 +344,11 @@ that depends on a Kubernetes API server is inactive:
   canary). The reconciler is not started; `ds.ModelRewriteGet` returns nil
   for every request. There is no file-mode equivalent today.
 - **`InferenceObjective`** (per-request SLO objectives). The reconciler is
-  not started; objective lookups return nil. Plugins that depend on
-  per-request SLO data will see no objectives configured.
+  not started. `--objectives-file` loads `llm-d.ai/v1` `InferenceObjective`
+  manifests (`---`-separated) once at startup; requests select one with the
+  `x-llm-d-inference-objective` header and flow control provisions a band
+  for each priority. Pool references are ignored. Without the flag,
+  objective lookups return nil and every request gets priority 0.
 - **`k8s-notification-source` data layer plugin** (and any other notification
   source that needs the controller manager). The plugin loads from config
   but is never bound to a manager, so it produces no events. Remove it from
