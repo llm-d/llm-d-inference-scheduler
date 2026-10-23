@@ -88,6 +88,11 @@ The endpoint serves plain HTTP by default. Pass `--metrics-cert-dir` with a dire
 metrics listener does not fall back to HTTP. The metrics TLS setting is independent of
 `--secure-serving` and `--cert-path`, which apply to the sidecar data-plane listener.
 
+The endpoint negotiates OpenMetrics, the only exposition format that can carry exemplars. A
+scraper that does not ask for it keeps receiving the classic text format. No series is renamed,
+since every sidecar counter already ends in `_total`; see [Exemplars](#exemplars) for what the
+format change means for a scrape.
+
 Configuring the metrics listener controls scraping; field checks and trace attributes do not
 require that listener.
 
