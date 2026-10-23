@@ -36,6 +36,7 @@ spec:
   {{- else }}
   maxUnavailable: {{ $pdb.maxUnavailable }}
   {{- end }}
+---
 {{- end -}}
 {{- end -}}
 
@@ -78,5 +79,6 @@ spec:
   {{- else }}
   maxUnavailable: {{ $pdb.maxUnavailable }}
   {{- end }}
+---
 {{- end -}}
 {{- end -}}
