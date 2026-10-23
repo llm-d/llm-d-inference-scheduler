@@ -94,7 +94,7 @@ func Factory(name string, params *json.Decoder, handle fwkplugin.Handle) (fwkplu
 			return nil, fmt.Errorf("%s: parameters: %w", Type, err)
 		}
 	}
-	plugin, err := New(name, p)
+	plugin, err := newPlugin(name, p)
 	if err != nil {
 		return nil, err
 	}
@@ -130,14 +130,20 @@ type Plugin struct {
 	// endpoints is the endpoint object last added under each live ID. The
 	// runtime builds a fresh object for each add and dispatches a delete with
 	// the object it added, so a delete for a replaced object is told apart.
-	endpoints map[string]fwkdl.Endpoint
+	endpoints map[string]liveEndpoint
 	// pods is the estimate for each live ID.
 	pods map[string]*residency.Pod
 }
 
-// New validates p and returns a plugin named name. p's weights are used as
-// given; start from DefaultParameters.
-func New(name string, p Parameters) (*Plugin, error) {
+// liveEndpoint is the endpoint object last added under an ID, and when.
+type liveEndpoint struct {
+	obj   fwkdl.Endpoint
+	added time.Time
+}
+
+// newPlugin validates p and returns a plugin named name. p's weights are used
+// as given, so callers start from DefaultParameters, as Factory does.
+func newPlugin(name string, p Parameters) (*Plugin, error) {
 	if len(p.BaseModels) == 0 {
 		return nil, errors.New(Type + ": baseModels is required")
 	}
@@ -171,7 +177,7 @@ func New(name string, p Parameters) (*Plugin, error) {
 		demand:     demand,
 		now:        time.Now,
 		requests:   map[string]*request{},
-		endpoints:  map[string]fwkdl.Endpoint{},
+		endpoints:  map[string]liveEndpoint{},
 		pods:       map[string]*residency.Pod{},
 	}, nil
 }
@@ -197,40 +203,47 @@ func (s *Plugin) Consumes() fwkplugin.DataDependencies {
 // An empty model names no adapter.
 func (s *Plugin) isBase(model string) bool { return model == "" || s.baseModels[model] }
 
-// Score refreshes each live candidate's capacity and activity snapshot from its
+// Score refreshes each candidate's capacity and activity snapshot from its
 // scraped metrics, then scores it by the estimated cost of serving the request.
+// The estimate is read under s.mu and priced after it is released, so pricing
+// does not hold up the response hooks.
 func (s *Plugin) Score(ctx context.Context, req *fwksched.InferenceRequest, endpoints []fwksched.Endpoint) map[fwksched.Endpoint]float64 {
-	ids := make([]string, 0, len(endpoints))
+	adapter := ""
+	if req != nil {
+		adapter = req.TargetModel
+	}
+	isBase := s.isBase(adapter)
 	byID := make(map[string]fwksched.Endpoint, len(endpoints))
+	admissions := make(map[string]residency.Admission, len(endpoints))
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, ep := range endpoints {
 		id := endpointID(ep)
 		if id == "" {
 			continue
 		}
-		ids = append(ids, id)
 		byID[id] = ep
-		// A snapshot taken before a delete can be scored after it; observing
-		// it would recreate an estimate that nothing removes.
-		if _, live := s.endpoints[id]; !live {
-			log.FromContext(ctx).V(logging.DEBUG).Info("Not observing a candidate with no live endpoint", "endpoint", id)
-			continue
-		}
-		if m := ep.GetMetrics(); m != nil {
-			p := s.pod(id)
-			if m.MaxActiveModels > 0 { // 0 means unreported
-				p.SetCapacity(m.MaxActiveModels, s.cpuSlots)
+		if s.current(ep, id) {
+			if m := ep.GetMetrics(); m != nil {
+				p := s.pod(id)
+				if m.MaxActiveModels > 0 { // 0 means unreported
+					p.SetCapacity(m.MaxActiveModels, s.cpuSlots)
+				}
+				// ActiveModels is running OR queued, so it protects, never touches.
+				p.ObserveActive(slices.Collect(maps.Keys(m.ActiveModels)))
 			}
-			// ActiveModels is running OR queued, so it protects, never touches.
-			p.ObserveActive(slices.Collect(maps.Keys(m.ActiveModels)))
+		} else {
+			log.FromContext(ctx).V(logging.DEBUG).Info("Not observing a stale candidate snapshot", "endpoint", id)
 		}
+		// A candidate with no estimate, including one whose endpoint was
+		// deleted, is still scored, as a pod that holds nothing.
+		a := residency.Admission{Tier: residency.Absent}
+		if p := s.pods[id]; p != nil && !isBase {
+			a = p.Admit(adapter)
+		}
+		admissions[id] = a
 	}
-	adapter := ""
-	if req != nil {
-		adapter = req.TargetModel
-	}
-	scores := lorascore.Score(s.pods, s.demand, adapter, s.isBase(adapter), ids, s.weights, s.now())
+	s.mu.Unlock()
+	scores := lorascore.Score(admissions, s.demand, isBase, s.weights, s.now())
 	out := make(map[fwksched.Endpoint]float64, len(scores))
 	for id, v := range scores {
 		out[byID[id]] = v
@@ -254,8 +267,8 @@ func (s *Plugin) PreRequest(ctx context.Context, req *fwksched.InferenceRequest,
 		logger.V(logging.DEBUG).Info("Ignoring a repeated PreRequest", "requestId", req.RequestID)
 		return nil
 	}
-	if _, live := s.endpoints[pod]; !live {
-		logger.V(logging.DEBUG).Info("Not recording a route to a deleted endpoint", "requestId", req.RequestID, "endpoint", pod)
+	if !s.current(result.PrimaryEndpoint(), pod) {
+		logger.V(logging.DEBUG).Info("Not recording a route to a deleted or replaced endpoint", "requestId", req.RequestID, "endpoint", pod)
 		return nil
 	}
 	s.requests[req.RequestID] = &request{pod: pod, adapter: req.TargetModel}
@@ -347,13 +360,13 @@ func (s *Plugin) Extract(ctx context.Context, event fwkdl.EndpointEvent) error {
 	cur, known := s.endpoints[id]
 	switch event.Type {
 	case fwkdl.EventAddOrUpdate:
-		if !known || cur != event.Endpoint {
+		if !known || cur.obj != event.Endpoint {
 			s.forget(id)
+			s.endpoints[id] = liveEndpoint{obj: event.Endpoint, added: s.now()}
 			logger.V(logging.TRACE).Info("Tracking a new endpoint", "endpoint", id, "replaced", known)
 		}
-		s.endpoints[id] = event.Endpoint
 	case fwkdl.EventDelete:
-		if known && cur != event.Endpoint {
+		if known && cur.obj != event.Endpoint {
 			logger.V(logging.DEBUG).Info("Ignoring a stale delete for a replaced endpoint", "endpoint", id)
 			return nil
 		}
@@ -362,6 +375,27 @@ func (s *Plugin) Extract(ctx context.Context, event fwkdl.EndpointEvent) error {
 		logger.V(logging.TRACE).Info("Forgot a deleted endpoint", "endpoint", id)
 	}
 	return nil
+}
+
+// current reports whether ep, a candidate snapshot for id, describes id's live
+// endpoint object. The snapshot is a copy, so it cannot be compared with the
+// object; its metrics' scrape time can. The runtime dispatches a new object's
+// add before its collector's first tick, so a snapshot whose metrics were
+// scraped before the object was added was taken from the object it replaced.
+// An unscraped snapshot is accepted: it is normally the new object's.
+//
+// The check is not exact. A scrape of the old object still in flight when
+// its collector stops can stamp a time after the add, and an old object that
+// was never scraped passes too. Either way one score observes the old
+// object's activity until the next scrape, and one route is recorded on the
+// replacement until that request ends. Callers hold s.mu.
+func (s *Plugin) current(ep fwksched.Endpoint, id string) bool {
+	cur, live := s.endpoints[id]
+	if !live {
+		return false
+	}
+	m := ep.GetMetrics()
+	return !m.Updated() || !m.UpdateTime.Before(cur.added)
 }
 
 // pod returns id's estimate, creating it with one GPU slot until the pod

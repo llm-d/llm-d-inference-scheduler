@@ -27,10 +27,10 @@ limitations under the License.
 //
 // The router does not see engine steps, so recency comes from evidence that an
 // adapter executed: a request that started producing output, or a finished
-// request that had started. A request that is only routed is pending and changes nothing, because vLLM
-// schedules running requests first and skips a waiting request whose adapter
-// would exceed max_loras. An executing adapter ranks above every idle one,
-// since vLLM touches it each step.
+// request that had started. A request that is only routed is pending and
+// changes nothing, because vLLM schedules running requests first and skips a
+// waiting request whose adapter would exceed max_loras. An executing adapter
+// ranks above every idle one, since vLLM touches it each step.
 package residency
 
 import (
@@ -123,11 +123,6 @@ func (p *Pod) Routed(adapter string) {
 	p.pending[adapter]++
 }
 
-// Pending returns the number of routed requests for adapter not yet started.
-func (p *Pod) Pending(adapter string) int {
-	return p.pending[adapter]
-}
-
 // Started records evidence that a request for adapter executed at time t, such
 // as its first response chunk.
 func (p *Pod) Started(adapter string, t time.Time) {
@@ -170,11 +165,6 @@ func (p *Pod) Order() []string {
 	}
 	sort.Slice(names, func(i, j int) bool { return p.before(names[i], names[j]) })
 	return names
-}
-
-// Tier returns where adapter is estimated to live.
-func (p *Pod) Tier(adapter string) Tier {
-	return p.tierIn(p.Order(), adapter)
 }
 
 func (p *Pod) tierIn(order []string, adapter string) Tier {

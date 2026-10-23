@@ -34,8 +34,8 @@ func near(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
 func TestDemandDecaysByHalfLife(t *testing.T) {
 	d := mustDemand(t, 10*time.Second)
 	d.Observe("a", at(0))
-	r0 := d.Rate("a", at(0))
-	if r := d.Rate("a", at(10)); !near(r, r0/2) {
+	r0 := d.rate("a", at(0))
+	if r := d.rate("a", at(10)); !near(r, r0/2) {
 		t.Fatalf("Rate after one half-life = %v, want %v", r, r0/2)
 	}
 }
@@ -45,7 +45,7 @@ func TestDemandSteadyStateMatchesArrivalRate(t *testing.T) {
 	for i := 0; i < 2000; i++ { // 4 req/s for 500 s, 100 half-lives
 		d.Observe("a", at(float64(i)*0.25))
 	}
-	if r := d.Rate("a", at(499.75)); math.Abs(r-4) > 0.3 {
+	if r := d.rate("a", at(499.75)); math.Abs(r-4) > 0.3 {
 		t.Fatalf("steady-state Rate = %v, want ~4 req/s", r)
 	}
 }
@@ -58,7 +58,7 @@ func TestDemandForgetsDecayedAdapters(t *testing.T) {
 		d.Observe(fmt.Sprintf("stale-%d", i), at(0))
 	}
 	d.Observe("live", at(1000)) // 100 half-lives later
-	if s := d.Share("live", at(1000)); !near(s, 1) {
+	if s := d.share("live", at(1000)); !near(s, 1) {
 		t.Fatalf("Share(live) = %v, want 1", s)
 	}
 	if got := len(d.adapter); got != 1 {
@@ -81,10 +81,10 @@ func TestDemandBoundedUnderUniqueNames(t *testing.T) {
 	now := at(10)
 	sum := 0.0
 	for a := range d.adapter {
-		sum += d.Rate(a, now)
+		sum += d.rate(a, now)
 	}
 	for _, a := range []string{"name-9999", "name-9990"} {
-		if got, want := d.Share(a, now), d.Rate(a, now)/sum; want == 0 || math.Abs(got-want) > 1e-9*want {
+		if got, want := d.share(a, now), d.rate(a, now)/sum; want == 0 || math.Abs(got-want) > 1e-9*want {
 			t.Fatalf("Share(%s) = %v, want %v", a, got, want)
 		}
 	}
@@ -131,7 +131,7 @@ func TestDemandLateObservationDoesNotInflate(t *testing.T) {
 	want := mustDemand(t, 10*time.Second)
 	want.Observe("a", at(10))
 	want.Observe("a", at(10))
-	if got, w := d.Rate("a", at(10)), want.Rate("a", at(10)); !near(got, w) {
+	if got, w := d.rate("a", at(10)), want.rate("a", at(10)); !near(got, w) {
 		t.Fatalf("Rate after a late observation = %v, want %v", got, w)
 	}
 }
@@ -141,10 +141,10 @@ func TestDemandShare(t *testing.T) {
 	d.Observe("a", at(0))
 	d.Observe("a", at(0))
 	d.Observe("b", at(0))
-	if s := d.Share("a", at(0)); !near(s, 2.0/3) {
+	if s := d.share("a", at(0)); !near(s, 2.0/3) {
 		t.Fatalf("Share(a) = %v, want 2/3", s)
 	}
-	if s := d.Share("unseen", at(0)); s != 0 {
+	if s := d.share("unseen", at(0)); s != 0 {
 		t.Fatalf("Share(unseen) = %v, want 0", s)
 	}
 }
@@ -157,6 +157,19 @@ func setup(t *testing.T) (estimate, *Demand) {
 		m[p] = residency.NewPod(1, 3)
 	}
 	return m, mustDemand(t, time.Minute)
+}
+
+// admit is each pod's admission of adapter, as the plugin builds it: a pod
+// with no estimate admits as Absent.
+func admit(m estimate, adapter string, pods ...string) map[string]residency.Admission {
+	out := make(map[string]residency.Admission, len(pods))
+	for _, p := range pods {
+		out[p] = residency.Admission{Tier: residency.Absent}
+		if e := m[p]; e != nil {
+			out[p] = e.Admit(adapter)
+		}
+	}
+	return out
 }
 
 func serve(m estimate, d *Demand, pod, adapter string, s float64) {
@@ -172,7 +185,7 @@ func TestGPUBeatsCPUBeatsAbsent(t *testing.T) {
 	serve(m, d, "p1", "a", 1)
 	serve(m, d, "p1", "x", 2) // p1: x on GPU, a in CPU
 	// p2 knows nothing: a must be loaded.
-	s := Score(m, d, "a", false, []string{"p0", "p1", "p2"}, DefaultWeights(), at(3))
+	s := Score(admit(m, "a", []string{"p0", "p1", "p2"}...), d, false, DefaultWeights(), at(3))
 	if !(s["p0"] > s["p1"] && s["p1"] > s["p2"]) {
 		t.Fatalf("want p0 > p1 > p2, got %v", s)
 	}
@@ -184,7 +197,7 @@ func TestEvictingHotAdapterCostsMore(t *testing.T) {
 		serve(m, d, "p0", "hot", float64(i)*0.1) // p0's GPU slot holds a hot adapter
 	}
 	serve(m, d, "p1", "cold", 1) // p1's holds a cold one
-	s := Score(m, d, "new", false, []string{"p0", "p1"}, DefaultWeights(), at(2))
+	s := Score(admit(m, "new", []string{"p0", "p1"}...), d, false, DefaultWeights(), at(2))
 	if !(s["p1"] > s["p0"]) {
 		t.Fatalf("want evicting cold (p1) preferred over hot (p0), got %v", s)
 	}
@@ -198,7 +211,7 @@ func TestEvictionWeightZeroIgnoresVictim(t *testing.T) {
 	serve(m, d, "p1", "cold", 1)
 	w := DefaultWeights()
 	w.EvictionWeight = 0
-	s := Score(m, d, "new", false, []string{"p0", "p1"}, w, at(2))
+	s := Score(admit(m, "new", []string{"p0", "p1"}...), d, false, w, at(2))
 	if !near(s["p0"], s["p1"]) {
 		t.Fatalf("with EvictionWeight 0 both are plain loads, want equal, got %v", s)
 	}
@@ -209,7 +222,7 @@ func TestBlockedPodPenalized(t *testing.T) {
 	m["p0"].Routed("busy")
 	m["p0"].Started("busy", at(1)) // p0's only slot is running
 	d.Observe("busy", at(1))
-	s := Score(m, d, "new", false, []string{"p0", "p1"}, DefaultWeights(), at(2))
+	s := Score(admit(m, "new", []string{"p0", "p1"}...), d, false, DefaultWeights(), at(2))
 	if !(s["p1"] > s["p0"]) {
 		t.Fatalf("want free p1 over blocked p0, got %v", s)
 	}
@@ -220,7 +233,7 @@ func TestBaseModelRequestIsNeutral(t *testing.T) {
 	serve(m, d, "p0", "a", 1)
 	m["p1"].Routed("busy")
 	m["p1"].Started("busy", at(1))
-	s := Score(m, d, "base", true, []string{"p0", "p1", "p2"}, DefaultWeights(), at(2))
+	s := Score(admit(m, "base", []string{"p0", "p1", "p2"}...), d, true, DefaultWeights(), at(2))
 	for _, p := range []string{"p1", "p2"} {
 		if s[p] != s["p0"] {
 			t.Fatalf("base-model request must score every pod equally, got %v", s)
@@ -231,7 +244,7 @@ func TestBaseModelRequestIsNeutral(t *testing.T) {
 func TestScoresInUnitRangeAndBestIsOne(t *testing.T) {
 	m, d := setup(t)
 	serve(m, d, "p0", "a", 1)
-	s := Score(m, d, "a", false, []string{"p0", "p1", "p2"}, DefaultWeights(), at(2))
+	s := Score(admit(m, "a", []string{"p0", "p1", "p2"}...), d, false, DefaultWeights(), at(2))
 	for p, v := range s {
 		if v < 0 || v > 1 {
 			t.Fatalf("score %s = %v outside [0,1]", p, v)
@@ -247,7 +260,7 @@ func TestScoresInUnitRangeAndBestIsOne(t *testing.T) {
 
 func TestAllEqualCostAllScoreOne(t *testing.T) {
 	m, d := setup(t)
-	s := Score(m, d, "a", false, []string{"p0", "p1"}, DefaultWeights(), at(1))
+	s := Score(admit(m, "a", []string{"p0", "p1"}...), d, false, DefaultWeights(), at(1))
 	if s["p0"] != 1 || s["p1"] != 1 {
 		t.Fatalf("equal costs must not discriminate, got %v", s)
 	}
@@ -262,7 +275,7 @@ func TestCopyCostAloneOrdersTiers(t *testing.T) {
 	serve(m, d, "p1", "x", 2)
 	w := DefaultWeights()
 	w.EvictionWeight = 0
-	s := Score(m, d, "a", false, []string{"p0", "p1", "p2"}, w, at(3))
+	s := Score(admit(m, "a", []string{"p0", "p1", "p2"}...), d, false, w, at(3))
 	if !(s["p0"] > s["p1"] && s["p1"] > s["p2"]) {
 		t.Fatalf("want GPU > CPU > Absent on copy/load cost alone, got %v", s)
 	}
@@ -273,7 +286,7 @@ func TestCheapestScoresOneWhenAllCostSomething(t *testing.T) {
 	m, d := setup(t)
 	serve(m, d, "p1", "a", 1)
 	serve(m, d, "p1", "x", 2) // p1: a in CPU
-	s := Score(m, d, "a", false, []string{"p1", "p2"}, DefaultWeights(), at(3))
+	s := Score(admit(m, "a", []string{"p1", "p2"}...), d, false, DefaultWeights(), at(3))
 	if s["p1"] != 1 || s["p2"] != 0 {
 		t.Fatalf("want p1=1 (copy) and p2=0 (load), got %v", s)
 	}
@@ -281,7 +294,7 @@ func TestCheapestScoresOneWhenAllCostSomething(t *testing.T) {
 
 func TestShareBeforeAnyRequestIsZero(t *testing.T) {
 	d := mustDemand(t, time.Minute)
-	if s := d.Share("a", at(0)); s != 0 {
+	if s := d.share("a", at(0)); s != 0 {
 		t.Fatalf("Share with no observations = %v, want 0", s)
 	}
 }
@@ -300,7 +313,7 @@ func TestDefaultConfigVictimPricedAsLoad(t *testing.T) {
 		t.Fatalf("Admit(new) = %+v, want CPUVictim hot and no GPUVictim", adm)
 	}
 	w := DefaultWeights()
-	share := d.Share("hot", at(3))
+	share := d.share("hot", at(3))
 	if got, want := cost(adm, d.Shares([]string{adm.GPUVictim, adm.CPUVictim}, at(3)), w), w.LoadCost+share*w.LoadCost; !near(got, want) {
 		t.Fatalf("cost = %v, want LoadCost + share*LoadCost = %v", got, want)
 	}
@@ -317,7 +330,7 @@ func TestBothVictimsPriced(t *testing.T) {
 		t.Fatalf("Admit(new) = %+v, want GPUVictim b, CPUVictim a", adm)
 	}
 	w := DefaultWeights()
-	want := w.LoadCost + d.Share("b", at(3))*w.CopyCost + d.Share("a", at(3))*w.LoadCost
+	want := w.LoadCost + d.share("b", at(3))*w.CopyCost + d.share("a", at(3))*w.LoadCost
 	if got := cost(adm, d.Shares([]string{adm.GPUVictim, adm.CPUVictim}, at(3)), w); !near(got, want) {
 		t.Fatalf("cost = %v, want %v", got, want)
 	}
@@ -329,12 +342,12 @@ func TestBothVictimsPriced(t *testing.T) {
 func TestPendingRequestDoesNotLookResident(t *testing.T) {
 	m, d := setup(t)
 	m["p0"].Routed("a")
-	if got := m["p0"].Tier("a"); got != residency.Absent {
+	if got := m["p0"].Admit("a").Tier; got != residency.Absent {
 		t.Fatalf("Tier(p0, a) = %v, want Absent while only pending", got)
 	}
 	w := DefaultWeights()
 	w.PendingCost = w.LoadCost
-	s := Score(m, d, "a", false, []string{"p0", "p1"}, w, at(1))
+	s := Score(admit(m, "a", []string{"p0", "p1"}...), d, false, w, at(1))
 	if s["p0"] != s["p1"] {
 		t.Fatalf("with PendingCost = LoadCost the pending pod must gain nothing, got %v", s)
 	}
@@ -386,7 +399,7 @@ func TestBurstForColdAdapterFollowsPendingPod(t *testing.T) {
 	m["p0"].Routed("cold")
 	d.Observe("cold", at(1))
 	for i := 0; i < 3; i++ {
-		s := Score(m, d, "cold", false, []string{"p0", "p1", "p2"}, DefaultWeights(), at(1))
+		s := Score(admit(m, "cold", []string{"p0", "p1", "p2"}...), d, false, DefaultWeights(), at(1))
 		if !(s["p0"] > s["p1"] && s["p0"] > s["p2"]) {
 			t.Fatalf("request %d: want p0 (already loading cold) preferred, got %v", i, s)
 		}
@@ -399,7 +412,7 @@ func TestGPUBeatsPending(t *testing.T) {
 	m, d := setup(t)
 	serve(m, d, "p0", "a", 1)
 	m["p1"].Routed("a")
-	s := Score(m, d, "a", false, []string{"p0", "p1"}, DefaultWeights(), at(2))
+	s := Score(admit(m, "a", []string{"p0", "p1"}...), d, false, DefaultWeights(), at(2))
 	if !(s["p0"] > s["p1"]) {
 		t.Fatalf("want GPU p0 over pending p1, got %v", s)
 	}

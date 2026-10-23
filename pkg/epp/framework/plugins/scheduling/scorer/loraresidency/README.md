@@ -16,7 +16,7 @@ The plugin keeps one recency order per pod, built from evidence that an adapter 
 
 The `max_lora` label of `vllm:lora_requests_info`, scraped as `MaxActiveModels`, sets each pod's GPU slots. Adapters reported active in `ActiveModels` (running or queued) are never chosen as GPU victims, and they count toward a pod being blocked. They do not make an adapter resident, because a queued adapter need not be loaded.
 
-Endpoint lifecycle events keep the estimate per endpoint object. A deleted or replaced pod starts empty, and callbacks for requests on it are dropped.
+Endpoint lifecycle events keep the estimate per endpoint object. A deleted or replaced pod starts empty, and callbacks for requests on it are dropped. A candidate snapshot whose metrics were scraped before its pod was replaced is neither observed nor recorded, and a deleted candidate is scored as a pod that holds nothing.
 
 ### Scoring formula
 
@@ -41,12 +41,17 @@ Scores are min-max normalized over the candidates: the cheapest pod scores `1.0`
 
 `lora-affinity-scorer` reads only the scraped `running_lora_adapters` and `waiting_lora_adapters` labels and keeps no state. Use it when adapters fit in the pods' GPU slots, or when traffic reaches the pods through more than this EPP.
 
-`lora-residency-scorer` keeps an estimate of each pod's GPU and CPU-cache adapters from the requests it routes, and prices the evictions a placement causes by demand. Use it when there are more adapters than GPU slots, so that misses and evictions decide latency, and the EPP routes all traffic to the pods. Configure one of the two, not both.
+`lora-residency-scorer` keeps an estimate of each pod's GPU and CPU-cache adapters from the requests it routes, and prices the evictions a placement causes by demand. Use it when there are more adapters than GPU slots, so that misses and evictions decide latency, and the EPP routes all traffic to the pods.
+
+`lora-load-state-scorer`, proposed in llm-d/llm-d-router#2792, reads each pod's GPU and CPU-cache adapters from vLLM's residency gauges instead of estimating them, so it also sees traffic and loads that bypass this EPP. It needs a vLLM release that publishes those gauges. Reconciling this scorer's estimate with the same gauges is tracked in llm-d/llm-d-router#3558.
+
+Configure one LoRA scorer, not several.
 
 ## Inputs consumed
 
 - `metrics.ActiveModelsKey` (`map[string]int`)
 - endpoint metric `MaxActiveModels`
+- endpoint metric `UpdateTime`, the scrape time, to tell a snapshot of a replaced pod from its replacement
 
 The plugin also implements PreRequest, ResponseHeader and ResponseBody, and registers an endpoint-lifecycle extractor. The runner wires a configured plugin into each of these, so declaring it once as a scorer is enough. If the configuration declares no endpoint-notification data source, the extractor registration adds one.
 

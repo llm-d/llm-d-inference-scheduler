@@ -43,11 +43,12 @@ import (
 var ctx = context.Background()
 
 // rig drives the plugin the way the framework does. The runtime announces each
-// endpoint object with an add event before the datastore stores it, and the
-// director scores each request on a candidate snapshot cloned from those
-// objects and passes the picked snapshot endpoint to PreRequest. Score sees the
-// snapshot through the scheduler's data scope, which hides every key the
-// plugin does not declare.
+// endpoint object with an add event, normally before its first scrape, and
+// stops the old object's collector before announcing its delete. The director
+// scores each request on a candidate snapshot cloned from those objects and
+// passes the picked snapshot endpoint to PreRequest. Score sees the snapshot
+// through the scheduler's data scope, which hides every key the plugin does
+// not declare.
 type rig struct {
 	t     *testing.T
 	p     *Plugin
@@ -69,9 +70,9 @@ func newRig(t *testing.T, set func(*Parameters), maxLoras int, pods ...string) *
 	if set != nil {
 		set(&params)
 	}
-	p, err := New("test", params)
+	p, err := newPlugin("test", params)
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("newPlugin: %v", err)
 	}
 	r := &rig{
 		t: t, p: p, now: time.Unix(1_000_000, 0),
@@ -80,14 +81,22 @@ func newRig(t *testing.T, set func(*Parameters), maxLoras int, pods ...string) *
 	}
 	p.now = func() time.Time { return r.now }
 	for _, name := range pods {
-		obj := fwkdl.NewEndpoint(
-			&fwkdl.EndpointMetadata{ID: k8stypes.NamespacedName{Namespace: "ns", Name: name}},
-			&fwkdl.Metrics{ActiveModels: map[string]int{}, WaitingModels: map[string]int{}, MaxActiveModels: maxLoras})
+		obj := fwkdl.NewEndpoint(&fwkdl.EndpointMetadata{ID: k8stypes.NamespacedName{Namespace: "ns", Name: name}}, nil)
 		r.order = append(r.order, name)
 		r.cur[name] = obj
 		r.extract(fwkdl.EventAddOrUpdate, obj)
+		r.scrape(name, maxLoras)
 	}
 	return r
+}
+
+// scrape writes a scrape of pod's current object, with no active adapters, as
+// the metrics extractor does: a new snapshot stamped with the scrape time.
+func (r *rig) scrape(pod string, maxLoras int) {
+	r.cur[pod].UpdateMetrics(&fwkdl.Metrics{
+		ActiveModels: map[string]int{}, WaitingModels: map[string]int{},
+		MaxActiveModels: maxLoras, UpdateTime: r.now,
+	})
 }
 
 func (r *rig) id(pod string) string { return "ns/" + pod }
@@ -122,22 +131,21 @@ func (r *rig) extract(eventType fwkdl.EventType, ep fwkdl.Endpoint) {
 	}
 }
 
-// metrics is pod's live metrics, shared by every object for that pod.
+// metrics is pod's current object's latest scrape.
 func (r *rig) metrics(pod string) *fwkdl.Metrics { return r.cur[pod].GetMetrics() }
 
-// fresh is a new endpoint object for pod's ID, as NewEndpoint builds for an
-// add; it is not announced.
-func (r *rig) fresh(pod string) fwkdl.Endpoint {
-	return fwkdl.NewEndpoint(r.cur[pod].GetMetadata(), r.cur[pod].GetMetrics())
-}
-
-// replace announces a new object for pod and returns the one it replaced.
+// replace announces a new object for pod, unscraped as NewEndpoint builds it,
+// a moment after the old object's last scrape, then scrapes it with the old
+// object's max_loras. It returns the object it replaced.
 func (r *rig) replace(pod string) fwkdl.Endpoint {
 	old := r.cur[pod]
-	obj := r.fresh(pod)
+	r.now = r.now.Add(time.Millisecond)
+	obj := fwkdl.NewEndpoint(old.GetMetadata(), nil)
 	r.extract(fwkdl.EventAddOrUpdate, obj)
 	r.cur[pod] = obj
 	delete(r.gone, pod)
+	r.now = r.now.Add(time.Millisecond)
+	r.scrape(pod, old.GetMetrics().MaxActiveModels)
 	return old
 }
 
@@ -276,7 +284,7 @@ func (r *rig) serve(model, pod string) {
 	r.end(req, false, fwkrc.TerminationCauseNatural)
 }
 
-func TestNewValidates(t *testing.T) {
+func TestNewPluginValidates(t *testing.T) {
 	for name, set := range map[string]func(*Parameters){
 		"no base models":     func(p *Parameters) { p.BaseModels = nil },
 		"bad half-life":      func(p *Parameters) { p.DemandHalfLife = "soon" },
@@ -287,8 +295,8 @@ func TestNewValidates(t *testing.T) {
 		p := DefaultParameters()
 		p.BaseModels = []string{"b"}
 		set(&p)
-		if _, err := New("x", p); err == nil {
-			t.Errorf("%s: New succeeded, want an error", name)
+		if _, err := newPlugin("x", p); err == nil {
+			t.Errorf("%s: newPlugin succeeded, want an error", name)
 		}
 	}
 }
@@ -358,8 +366,9 @@ func TestEmptyTargetModelIsNeutralAndUntracked(t *testing.T) {
 	if got := r.admit("p1", ""); got.Tier != residency.Absent || got.Pending {
 		t.Fatalf("empty target model tracked as an adapter: %+v", got)
 	}
-	if got := r.p.demand.Rate("", r.now); got != 0 {
-		t.Fatalf("empty target model counted as demand: %v", got)
+	r.route("a", "p0")
+	if got := r.p.demand.Shares([]string{"a"}, r.now)["a"]; got != 1 {
+		t.Fatalf("Share(a) = %v, want 1: the empty target model was counted as demand", got)
 	}
 }
 
@@ -395,9 +404,11 @@ func TestMaxCPULorasSizesCPUTier(t *testing.T) {
 func TestDemandHalfLifeApplied(t *testing.T) {
 	r := newRig(t, func(p *Parameters) { p.DemandHalfLife = "10s" }, 1, "p0")
 	r.route("a", "p0")
-	r0 := r.p.demand.Rate("a", r.now)
-	if got := r.p.demand.Rate("a", r.now.Add(10*time.Second)); r0 == 0 || math.Abs(got-r0/2) > 1e-9*r0 {
-		t.Fatalf("Rate after 10s = %v, want half of %v", got, r0)
+	r.now = r.now.Add(10 * time.Second)
+	r.route("b", "p0")
+	// a has decayed by one half-life when b arrives: rates 1/2 and 1.
+	if got := r.p.demand.Shares([]string{"a"}, r.now)["a"]; math.Abs(got-1.0/3) > 1e-9 {
+		t.Fatalf("Share(a) = %v, want 1/3 after one half-life", got)
 	}
 }
 
@@ -712,6 +723,92 @@ func TestDeleteBetweenScoreAndPreRequestRejected(t *testing.T) {
 	r.succeed(req)
 	if r.tracked("p0") || len(r.p.requests) != 0 {
 		t.Fatalf("a decision for a deleted pod was recorded: requests=%v", r.p.requests)
+	}
+}
+
+// Scoring a snapshot cloned before a replacement must not write the old
+// object's metrics into the replacement's estimate.
+func TestStaleSnapshotMetricsNotObserved(t *testing.T) {
+	r := newRig(t, nil, 1, "p0")
+	r.metrics("p0").ActiveModels["x"] = 1 // the old object's last scrape
+	snap, _ := r.snapshot()
+	r.replace("p0")
+	r.serve("x", "p0") // the replacement holds x, idle
+	r.scoreOn("b", snap)
+	if got := r.admit("p0", "b"); got.Blocked {
+		t.Fatalf("Admit(b) = %+v: the old object's ActiveModels protected x on the replacement", got)
+	}
+}
+
+// The director clones candidates before the scheduler invokes the scorer, so a
+// replacement can land after the old endpoint was cloned and before Score
+// runs. The decision is bound to the clone, not to when Score ran.
+func TestSnapshotBeforeReplacementScoredAfterRejected(t *testing.T) {
+	r := newRig(t, nil, 1, "p0")
+	snap, _ := r.snapshot()
+	r.replace("p0")
+	req := r.scoreOn("a", snap)
+	r.preRequest(req, "p0")
+	r.succeed(req)
+	if got := r.tier("p0", "a"); got != residency.Absent || len(r.p.requests) != 0 {
+		t.Fatalf("an old-snapshot decision was recorded against the replacement: Tier=%v requests=%v", got, r.p.requests)
+	}
+}
+
+// A replacement between Score and PreRequest.
+func TestReplacementBetweenScoreAndPreRequestRejected(t *testing.T) {
+	r := newRig(t, nil, 1, "p0")
+	req := r.scoreReq("a")
+	r.replace("p0")
+	r.preRequest(req, "p0")
+	r.succeed(req)
+	if got := r.tier("p0", "a"); got != residency.Absent {
+		t.Fatalf("Tier(replacement, a) = %v, want Absent: a pre-replacement decision was recorded", got)
+	}
+}
+
+// The same race across a delete and re-add of the same name.
+func TestStaleSnapshotAcrossDeleteAndReaddRejected(t *testing.T) {
+	r := newRig(t, nil, 1, "p0")
+	req := r.scoreReq("a")
+	r.del("p0")
+	r.replace("p0")
+	r.preRequest(req, "p0")
+	r.succeed(req)
+	if got := r.tier("p0", "a"); got != residency.Absent {
+		t.Fatalf("Tier = %v, want Absent: the decision predates the delete", got)
+	}
+}
+
+// A replacement's first snapshots, taken before its first scrape, carry no
+// metrics from the old object and are accepted.
+func TestUnscrapedReplacementSnapshotAccepted(t *testing.T) {
+	r := newRig(t, nil, 1, "p0")
+	r.extract(fwkdl.EventDelete, r.cur["p0"])
+	obj := fwkdl.NewEndpoint(r.cur["p0"].GetMetadata(), nil)
+	r.extract(fwkdl.EventAddOrUpdate, obj)
+	r.cur["p0"] = obj
+	r.serve("a", "p0")
+	if got := r.tier("p0", "a"); got != residency.GPU {
+		t.Fatalf("Tier = %v, want GPU: a decision on the unscraped replacement was rejected", got)
+	}
+}
+
+// A deleted candidate is still scored, as a pod that holds nothing.
+func TestDeletedCandidateScoredAsEmpty(t *testing.T) {
+	r := newRig(t, nil, 1, "p0", "p1")
+	r.serve("a", "p0")
+	r.serve("a", "p1")
+	snap, _ := r.snapshot()
+	r.del("p1")
+	_, list := r.snapshot()
+	list = append(list, snap["p1"])
+	s := map[string]float64{}
+	for ep, v := range r.runScore(&fwksched.InferenceRequest{TargetModel: "a"}, list) {
+		s[ep.GetMetadata().ID.Name] = v
+	}
+	if _, scored := s["p1"]; !scored || s["p0"] != 1 || s["p1"] != 0 {
+		t.Fatalf("want the live holder p0 = 1 and the deleted p1 scored 0, got %v", s)
 	}
 }
 

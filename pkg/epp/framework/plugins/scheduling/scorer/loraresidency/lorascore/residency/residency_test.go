@@ -41,8 +41,8 @@ func running(p *Pod, adapter string, s int) {
 
 func TestUnknownAdapterIsAbsent(t *testing.T) {
 	p := NewPod(2, 4)
-	if got := p.Tier("a"); got != Absent {
-		t.Fatalf("Tier(a) = %v, want Absent", got)
+	if got := p.Admit("a").Tier; got != Absent {
+		t.Fatalf("Admit(a).Tier = %v, want Absent", got)
 	}
 }
 
@@ -55,7 +55,7 @@ func TestMostRecentFillGPUThenCPU(t *testing.T) {
 		t.Fatalf("Order = %v, want %v", got, want)
 	}
 	for adapter, want := range map[string]Tier{"c": GPU, "b": GPU, "a": CPU} {
-		if got := p.Tier(adapter); got != want {
+		if got := p.Admit(adapter).Tier; got != want {
 			t.Errorf("Tier(%s) = %v, want %v", adapter, got, want)
 		}
 	}
@@ -66,8 +66,8 @@ func TestBeyondCPUCapacityIsForgotten(t *testing.T) {
 	served(p, "a", 1)
 	served(p, "b", 2)
 	served(p, "c", 3)
-	if got := p.Tier("a"); got != Absent {
-		t.Fatalf("Tier(a) = %v, want Absent once pushed past the CPU cache", got)
+	if got := p.Admit("a").Tier; got != Absent {
+		t.Fatalf("Admit(a).Tier = %v, want Absent once pushed past the CPU cache", got)
 	}
 	if got := len(p.Order()); got != 2 {
 		t.Fatalf("len(Order) = %d, want 2 (CPU capacity)", got)
@@ -81,11 +81,11 @@ func TestRoutedDoesNotDisplaceRunning(t *testing.T) {
 	p := NewPod(1, 2)
 	running(p, "a", 1)
 	p.Routed("b")
-	if got := p.Tier("a"); got != GPU {
-		t.Fatalf("Tier(a) = %v, want GPU (running)", got)
+	if got := p.Admit("a").Tier; got != GPU {
+		t.Fatalf("Admit(a).Tier = %v, want GPU (running)", got)
 	}
-	if got := p.Tier("b"); got != Absent {
-		t.Fatalf("Tier(b) = %v, want Absent (routed, not executed)", got)
+	if got := p.Admit("b").Tier; got != Absent {
+		t.Fatalf("Admit(b).Tier = %v, want Absent (routed, not executed)", got)
 	}
 }
 
@@ -96,14 +96,14 @@ func TestAbortBeforeStartLeavesNoTrace(t *testing.T) {
 	served(p, "a", 1)
 	p.Routed("b")
 	p.Finished("b", at(2), false)
-	if got := p.Tier("b"); got != Absent {
-		t.Fatalf("Tier(b) = %v, want Absent after an abort before start", got)
+	if got := p.Admit("b").Tier; got != Absent {
+		t.Fatalf("Admit(b).Tier = %v, want Absent after an abort before start", got)
 	}
-	if got := p.Tier("a"); got != GPU {
-		t.Fatalf("Tier(a) = %v, want GPU (untouched by the aborted request)", got)
+	if got := p.Admit("a").Tier; got != GPU {
+		t.Fatalf("Admit(a).Tier = %v, want GPU (untouched by the aborted request)", got)
 	}
-	if got := p.Pending("b"); got != 0 {
-		t.Fatalf("Pending(b) = %d, want 0 after the abort", got)
+	if got := p.pending["b"]; got != 0 {
+		t.Fatalf("pending[b] = %d, want 0 after the abort", got)
 	}
 }
 
@@ -113,11 +113,11 @@ func TestRunningOutranksIdle(t *testing.T) {
 	p := NewPod(1, 3)
 	running(p, "a", 1)
 	served(p, "b", 5)
-	if got := p.Tier("a"); got != GPU {
-		t.Fatalf("Tier(a) = %v, want GPU while running", got)
+	if got := p.Admit("a").Tier; got != GPU {
+		t.Fatalf("Admit(a).Tier = %v, want GPU while running", got)
 	}
 	p.Finished("a", at(3), true) // a's last step precedes b's
-	if got := p.Tier("b"); got != GPU {
+	if got := p.Admit("b").Tier; got != GPU {
 		t.Fatalf("after a finishes, Tier(b) = %v, want GPU", got)
 	}
 }
@@ -129,8 +129,8 @@ func TestUnmatchedFinishDoesNotUnderflow(t *testing.T) {
 	p.Finished("a", at(1), true)
 	running(p, "a", 3)
 	served(p, "b", 4)
-	if got := p.Tier("a"); got != GPU {
-		t.Fatalf("Tier(a) = %v, want GPU while its request runs", got)
+	if got := p.Admit("a").Tier; got != GPU {
+		t.Fatalf("Admit(a).Tier = %v, want GPU while its request runs", got)
 	}
 }
 
@@ -138,8 +138,8 @@ func TestUnmatchedStartDoesNotUnderflowPending(t *testing.T) {
 	p := NewPod(1, 2)
 	p.Started("a", at(1)) // no Routed seen
 	p.Routed("a")
-	if got := p.Pending("a"); got != 1 {
-		t.Fatalf("Pending(a) = %d, want 1 (the later route)", got)
+	if got := p.pending["a"]; got != 1 {
+		t.Fatalf("pending[a] = %d, want 1 (the later route)", got)
 	}
 }
 
@@ -159,8 +159,8 @@ func TestStaleTouchDoesNotRewindRecency(t *testing.T) {
 	served(p, "b", 4)
 	running(p, "a", 3)
 	p.Finished("a", at(3), true)
-	if got := p.Tier("a"); got != GPU {
-		t.Fatalf("Tier(a) = %v, want GPU (last use 5 beats b's 4)", got)
+	if got := p.Admit("a").Tier; got != GPU {
+		t.Fatalf("Admit(a).Tier = %v, want GPU (last use 5 beats b's 4)", got)
 	}
 }
 
@@ -186,13 +186,13 @@ func TestObserveActiveDoesNotCreateResidency(t *testing.T) {
 	p := NewPod(1, 3)
 	served(p, "a", 1)
 	p.ObserveActive([]string{"x"})
-	if got := p.Tier("x"); got != Absent {
-		t.Fatalf("Tier(x) = %v, want Absent (active may mean queued)", got)
+	if got := p.Admit("x").Tier; got != Absent {
+		t.Fatalf("Admit(x).Tier = %v, want Absent (active may mean queued)", got)
 	}
 	served(p, "b", 2)
 	p.ObserveActive([]string{"a"}) // a is in CPU, not GPU
-	if got := p.Tier("b"); got != GPU {
-		t.Fatalf("Tier(b) = %v, want GPU (ObserveActive must not touch a)", got)
+	if got := p.Admit("b").Tier; got != GPU {
+		t.Fatalf("Admit(b).Tier = %v, want GPU (ObserveActive must not touch a)", got)
 	}
 }
 
@@ -302,8 +302,8 @@ func TestCPUCapacityNeverBelowGPU(t *testing.T) {
 	served(p, "a", 1)
 	served(p, "b", 2)
 	served(p, "c", 3)
-	if got := p.Tier("a"); got != GPU {
-		t.Fatalf("Tier(a) = %v, want GPU (cpu clamped up to gpu=3)", got)
+	if got := p.Admit("a").Tier; got != GPU {
+		t.Fatalf("Admit(a).Tier = %v, want GPU (cpu clamped up to gpu=3)", got)
 	}
 }
 
@@ -322,8 +322,8 @@ func TestStartedClearsPending(t *testing.T) {
 	p := NewPod(1, 2)
 	p.Routed("a")
 	p.Started("a", at(1))
-	if got := p.Pending("a"); got != 0 {
-		t.Fatalf("Pending(a) = %d, want 0 once started", got)
+	if got := p.pending["a"]; got != 0 {
+		t.Fatalf("pending[a] = %d, want 0 once started", got)
 	}
 }
 

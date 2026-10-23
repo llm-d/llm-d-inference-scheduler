@@ -68,49 +68,43 @@ func (w Weights) Validate() error {
 	return nil
 }
 
-// Score returns a score in [0,1] per pod for a request for adapter, min-max
-// normalized over the candidates' costs: the cheapest pod scores 1, the
-// costliest 0, and equal costs score every pod 1 so they do not discriminate.
-// A base-model request scores every pod 1, leaving the choice to other scorers.
-// A candidate with no entry in est has no estimate and admits as Absent.
+// Score returns a score in [0,1] per pod for a request, given each candidate
+// pod's admission of the request's adapter. It is min-max normalized over the
+// candidates' costs: the cheapest pod scores 1, the costliest 0, and equal
+// costs score every pod 1 so they do not discriminate. A base-model request
+// scores every pod 1, leaving the choice to other scorers.
 //
 // isBase marks a base-model request. It must come from configuration (the
 // pool's base model names), not from the adapter being absent from metrics,
 // which is indistinguishable from a cold adapter.
-func Score(est map[string]*residency.Pod, d *Demand, adapter string, isBase bool, pods []string, w Weights, now time.Time) map[string]float64 {
-	scores := make(map[string]float64, len(pods))
+func Score(admissions map[string]residency.Admission, d *Demand, isBase bool, w Weights, now time.Time) map[string]float64 {
+	scores := make(map[string]float64, len(admissions))
 	if isBase {
-		for _, p := range pods {
+		for p := range admissions {
 			scores[p] = 1
 		}
 		return scores
 	}
-	admissions := make(map[string]residency.Admission, len(pods))
-	var victims []string
-	for _, p := range pods {
-		a := residency.Admission{Tier: residency.Absent}
-		if e := est[p]; e != nil {
-			a = e.Admit(adapter)
-		}
-		admissions[p] = a
+	victims := make([]string, 0, 2*len(admissions))
+	for _, a := range admissions {
 		victims = append(victims, a.GPUVictim, a.CPUVictim)
 	}
 	// One read of every victim's share, so that pods evicting the same adapter
 	// are charged exactly the same amount.
 	shares := d.Shares(victims, now)
-	costs := make(map[string]float64, len(pods))
+	costs := make(map[string]float64, len(admissions))
 	minCost, maxCost := math.Inf(1), 0.0
-	for _, p := range pods {
-		c := cost(admissions[p], shares, w)
+	for p, a := range admissions {
+		c := cost(a, shares, w)
 		costs[p] = c
 		minCost = math.Min(minCost, c)
 		maxCost = math.Max(maxCost, c)
 	}
-	for _, p := range pods {
+	for p, c := range costs {
 		if maxCost == minCost {
 			scores[p] = 1
 		} else {
-			scores[p] = 1 - (costs[p]-minCost)/(maxCost-minCost)
+			scores[p] = 1 - (c-minCost)/(maxCost-minCost)
 		}
 	}
 	return scores
@@ -207,20 +201,20 @@ func (d *Demand) evict(t time.Time) {
 	}
 }
 
-// Rate returns adapter's estimated request rate at time t.
-func (d *Demand) Rate(adapter string, t time.Time) float64 {
+// rate returns adapter's estimated request rate at time t.
+func (d *Demand) rate(adapter string, t time.Time) float64 {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.decayed(d.adapter[adapter], t)
 }
 
-// Share returns adapter's fraction of the total estimated rate at time t, or 0
+// share returns adapter's fraction of the total estimated rate at time t, or 0
 // when nothing has been observed.
-func (d *Demand) Share(adapter string, t time.Time) float64 {
+func (d *Demand) share(adapter string, t time.Time) float64 {
 	return d.Shares([]string{adapter}, t)[adapter]
 }
 
-// Shares returns each named adapter's Share at time t, all against one total.
+// Shares returns each named adapter's share at time t, all against one total.
 // Empty names are skipped. Summing the total also forgets decayed adapters.
 func (d *Demand) Shares(adapters []string, t time.Time) map[string]float64 {
 	d.mu.Lock()
