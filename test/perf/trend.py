@@ -16,7 +16,8 @@ MIN_BASELINE_RUNS = 4
 DEFAULT_REPOSITORY = "llm-d/llm-d-router"
 COMPARABLE_SETUP_KEYS = ("router_config", "perf_job", "sim_replicas")
 
-Metric = namedtuple("Metric", ["key", "label", "path", "alerts"])
+# Each metric has its own threshold so noisier measurements can be given more room.
+Metric = namedtuple("Metric", ["key", "label", "path", "alerts", "threshold"], defaults=[THRESHOLD])
 
 
 def container_metrics(container, alerts):
@@ -98,8 +99,8 @@ def metric_value(record, metric):
     return float(value)
 
 
-def compare_metric(metric, baseline_records, candidate, threshold, min_runs):
-    result = {"key": metric.key, "label": metric.label, "alerts": metric.alerts}
+def compare_metric(metric, baseline_records, candidate, min_runs):
+    result = {"key": metric.key, "label": metric.label, "alerts": metric.alerts, "threshold": metric.threshold, "over": False}
     tonight = metric_value(candidate, metric)
     values = [value for value in (metric_value(record, metric) for record in baseline_records) if value is not None]
     result.update(tonight=tonight, runs=len(values), baseline=None, delta=None, min=None, max=None)
@@ -111,26 +112,46 @@ def compare_metric(metric, baseline_records, candidate, threshold, min_runs):
         return result
     baseline = statistics.median(values)
     delta = (tonight - baseline) / baseline
-    result.update(baseline=baseline, delta=delta, min=min(values), max=max(values))
-    if delta <= threshold:
+    # Exceeding every baseline run keeps a metric with a wide normal range from firing on ordinary noise.
+    over = delta > metric.threshold and tonight > max(values)
+    result.update(baseline=baseline, delta=delta, min=min(values), max=max(values), over=over)
+    if not over:
         result["verdict"] = "within threshold"
     elif metric.alerts:
-        result["verdict"] = "regressed"
+        result["verdict"] = "over threshold"
     else:
         result["verdict"] = "over threshold, report only"
     return result
 
 
-def compare(baseline_records, candidate, threshold=THRESHOLD, min_runs=MIN_BASELINE_RUNS):
-    return [compare_metric(metric, baseline_records, candidate, threshold, min_runs) for metric in METRICS]
+def compare(baseline_records, candidate, min_runs=MIN_BASELINE_RUNS):
+    return [compare_metric(metric, baseline_records, candidate, min_runs) for metric in METRICS]
+
+
+def previous_run(records, run):
+    earlier = [
+        record
+        for record in records
+        if record["status"] == "SUCCESS"
+        and comparable(record, run)
+        and parse_time(record["started_at"]) < parse_time(run["started_at"])
+    ]
+    return earlier[-1] if earlier else None
+
+
+def confirm_regressions(results, previous_over):
+    # A metric regresses only when the previous comparable run was over its threshold too.
+    for result in results:
+        if result["verdict"] == "over threshold":
+            result["verdict"] = "regressed" if result["key"] in previous_over else "over threshold, first run"
 
 
 def commit_of(record):
     return record.get("provenance", {}).get("epp_commit") or None
 
 
-def evaluate(records, test_name, threshold=THRESHOLD, window_days=WINDOW_DAYS, min_runs=MIN_BASELINE_RUNS):
-    verdict = {"test_name": test_name, "threshold": threshold, "window_days": window_days, "min_baseline_runs": min_runs, "metrics": []}
+def evaluate(records, test_name, window_days=WINDOW_DAYS, min_runs=MIN_BASELINE_RUNS):
+    verdict = {"test_name": test_name, "window_days": window_days, "min_baseline_runs": min_runs, "metrics": []}
     if not records:
         verdict["status"] = "no_runs"
         return verdict
@@ -139,13 +160,17 @@ def evaluate(records, test_name, threshold=THRESHOLD, window_days=WINDOW_DAYS, m
     if tonight["status"] != "SUCCESS":
         verdict["status"] = "run_failed"
         return verdict
-    baseline = select_baseline(records, tonight, window_days)
+    previous = previous_run(records, tonight)
+    # Tonight and the previous run share one baseline from before the previous run, so a lasting step counts on both.
+    baseline = select_baseline(records, previous, window_days) if previous else []
     verdict["baseline_runs"] = [record["started_at"] for record in baseline]
-    verdict["baseline_commit"] = commit_of(baseline[-1]) if baseline else None
+    verdict["range_base_commit"] = commit_of(baseline[-1]) if baseline else None
     if len(baseline) < min_runs:
         verdict["status"] = "insufficient_baseline"
         return verdict
-    verdict["metrics"] = compare(baseline, tonight, threshold, min_runs)
+    verdict["metrics"] = compare(baseline, tonight, min_runs)
+    previous_over = {result["key"] for result in compare(baseline, previous, min_runs) if result["over"]}
+    confirm_regressions(verdict["metrics"], previous_over)
     regressed = any(result["verdict"] == "regressed" for result in verdict["metrics"])
     verdict["status"] = "regressed" if regressed else "ok"
     return verdict
@@ -161,24 +186,29 @@ def format_delta(value):
 
 def metrics_table(results):
     lines = [
-        "| Metric | Tonight | Baseline (median) | Delta | Baseline range | Runs | Verdict |",
-        "|---|---|---|---|---|---|---|",
+        "| Metric | Tonight | Baseline (median) | Delta | Threshold | Baseline range | Runs | Verdict |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for result in results:
         spread = "-" if result["min"] is None else f"{result['min']:.2f}-{result['max']:.2f}"
         lines.append(
             f"| {result['label']} | {format_number(result['tonight'])} | {format_number(result['baseline'])} | "
-            f"{format_delta(result['delta'])} | {spread} | {result['runs']} | {result['verdict']} |"
+            f"{format_delta(result['delta'])} | {result['threshold'] * 100:.0f}% | {spread} | {result['runs']} | {result['verdict']} |"
         )
     return "\n".join(lines)
 
 
+RULE_TEXT = (
+    "A metric regresses when tonight's run and the previous comparable run are both more than its threshold over the "
+    "median of the successful runs from the {window_days} days before the previous run, and above every one of them."
+)
+
 STATUS_TEXT = {
     "no_runs": "No run records found.",
     "run_failed": "Tonight's run did not succeed, so nothing was compared.",
-    "insufficient_baseline": "Fewer than {min_baseline_runs} comparable successful runs in the last {window_days} days, so nothing was compared.",
-    "ok": "No EPP metric is more than {threshold_pct}% worse than its {window_days}-day median.",
-    "regressed": "At least one EPP metric is more than {threshold_pct}% worse than its {window_days}-day median.",
+    "insufficient_baseline": "Fewer than {min_baseline_runs} comparable successful runs in the {window_days} days before the previous run, so nothing was compared.",
+    "ok": "No EPP metric regressed.",
+    "regressed": "At least one EPP metric regressed.",
 }
 
 
@@ -186,12 +216,15 @@ def status_line(verdict):
     return STATUS_TEXT[verdict["status"]].format(
         min_baseline_runs=verdict["min_baseline_runs"],
         window_days=verdict["window_days"],
-        threshold_pct=round(verdict["threshold"] * 100),
     )
 
 
+def rule_line(verdict):
+    return RULE_TEXT.format(window_days=verdict["window_days"])
+
+
 def render_summary(verdict):
-    lines = [f"## Perf trend: {verdict['test_name']}", "", status_line(verdict), ""]
+    lines = [f"## Perf trend: {verdict['test_name']}", "", status_line(verdict), "", rule_line(verdict), ""]
     if "tonight" in verdict:
         lines.append(f"Tonight: {verdict['tonight']['started_at']} (EPP commit `{verdict['tonight']['epp_commit'] or 'unknown'}`)")
     if "baseline_runs" in verdict:
@@ -211,16 +244,15 @@ def render_issue_body(verdict, repository, run_url=None):
     regressed = [result for result in verdict["metrics"] if result["verdict"] == "regressed"]
     lines = [
         issue_marker(verdict["test_name"]),
-        f"The nightly perf run on {verdict['tonight']['started_at']} found EPP metrics more than "
-        f"{round(verdict['threshold'] * 100)}% worse than the median of the last {verdict['window_days']} days "
-        f"({len(verdict['baseline_runs'])} comparable successful runs).",
+        f"The nightly perf run on {verdict['tonight']['started_at']} confirmed a regression in these EPP metrics. "
+        + rule_line(verdict),
         "",
         metrics_table(regressed),
         "",
     ]
-    link = compare_link(repository, verdict.get("baseline_commit"), verdict["tonight"]["epp_commit"])
+    link = compare_link(repository, verdict.get("range_base_commit"), verdict["tonight"]["epp_commit"])
     if link:
-        lines.append(f"Changes since the newest baseline run: {link}")
+        lines.append(f"Changes since the last run before the regression: {link}")
     else:
         lines.append("The commit range is unavailable: a run did not record its EPP commit, or both runs used the same commit.")
     if run_url:

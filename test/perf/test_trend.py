@@ -35,9 +35,13 @@ def run_record(day, status="SUCCESS", epp_peak_cpu=2000, p95=9.0, envoy_peak_cpu
     }
 
 
-def history(*tonight_args, **tonight_kwargs):
-    baseline = [run_record(day) for day in range(10, 17)]
-    return baseline + [run_record(17, *tonight_args, **tonight_kwargs)]
+def history(previous=None, tonight=None):
+    baseline = [run_record(day) for day in range(9, 16)]
+    return baseline + [run_record(16, **(previous or {})), run_record(17, **(tonight or {}))]
+
+
+def lasting(**values):
+    return history(previous=values, tonight=values)
 
 
 def result_for(verdict, key):
@@ -72,19 +76,25 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(trend.evaluate([], "job1")["status"], "no_runs")
 
     def test_failed_tonight_is_not_compared(self):
-        verdict = trend.evaluate(history(status="FAILED"), "job1")
+        verdict = trend.evaluate(history(tonight={"status": "FAILED"}), "job1")
         self.assertEqual(verdict["status"], "run_failed")
         self.assertEqual(verdict["metrics"], [])
 
     def test_fewer_than_four_baseline_runs_is_insufficient(self):
-        records = [run_record(day) for day in range(14, 18)]
-        verdict = trend.evaluate(records, "job1")
+        verdict = trend.evaluate([run_record(day) for day in range(13, 18)], "job1")
         self.assertEqual(verdict["status"], "insufficient_baseline")
         self.assertEqual(len(verdict["baseline_runs"]), 3)
-        self.assertEqual(trend.evaluate([run_record(day) for day in range(13, 18)], "job1")["status"], "ok")
+        self.assertEqual(trend.evaluate([run_record(day) for day in range(12, 18)], "job1")["status"], "ok")
 
-    def test_more_than_ten_percent_worse_regresses(self):
-        verdict = trend.evaluate(history(epp_peak_cpu=2201), "job1")
+    def test_no_previous_run_is_insufficient(self):
+        self.assertEqual(trend.evaluate([run_record(17)], "job1")["status"], "insufficient_baseline")
+
+    def test_baseline_is_the_week_before_the_previous_run(self):
+        verdict = trend.evaluate(history(), "job1")
+        self.assertEqual([run[:10] for run in verdict["baseline_runs"]], [f"2026-10-{day:02d}" for day in range(9, 16)])
+
+    def test_lasting_step_regresses(self):
+        verdict = trend.evaluate(lasting(epp_peak_cpu=2201), "job1")
         self.assertEqual(verdict["status"], "regressed")
         result = result_for(verdict, "epp.peak_cpu_m")
         self.assertEqual(result["verdict"], "regressed")
@@ -92,26 +102,60 @@ class EvaluateTests(unittest.TestCase):
         self.assertAlmostEqual(result["delta"], 0.1005)
         self.assertEqual(result["runs"], 7)
 
+    def test_lasting_step_is_reported_once(self):
+        records = [run_record(day) for day in range(8, 15)]
+        records += [run_record(day, epp_peak_cpu=2500) for day in range(15, 18)]
+        self.assertEqual(trend.evaluate(records[:-1], "job1")["status"], "regressed")
+        self.assertEqual(trend.evaluate(records, "job1")["status"], "ok")
+
+    def test_one_bad_run_is_reported_without_regressing(self):
+        verdict = trend.evaluate(history(tonight={"epp_peak_cpu": 2500}), "job1")
+        self.assertEqual(verdict["status"], "ok")
+        self.assertEqual(result_for(verdict, "epp.peak_cpu_m")["verdict"], "over threshold, first run")
+        recovered = trend.evaluate(history(previous={"epp_peak_cpu": 2500}), "job1")
+        self.assertEqual(recovered["status"], "ok")
+        self.assertEqual(result_for(recovered, "epp.peak_cpu_m")["verdict"], "within threshold")
+
     def test_exactly_ten_percent_and_improvements_do_not_regress(self):
         for value in (2200, 1500):
             with self.subTest(value=value):
-                verdict = trend.evaluate(history(epp_peak_cpu=value), "job1")
+                verdict = trend.evaluate(lasting(epp_peak_cpu=value), "job1")
                 self.assertEqual(verdict["status"], "ok")
                 self.assertEqual(result_for(verdict, "epp.peak_cpu_m")["verdict"], "within threshold")
 
+    def test_inside_the_baseline_range_does_not_regress(self):
+        records = lasting(epp_peak_cpu=2250)
+        records[3]["containers"]["epp"]["peak_cpu_m"] = 2300
+        verdict = trend.evaluate(records, "job1")
+        self.assertEqual(verdict["status"], "ok")
+        self.assertEqual(result_for(verdict, "epp.peak_cpu_m")["verdict"], "within threshold")
+
+    def test_per_metric_threshold(self):
+        loose = trend.Metric("epp.peak_cpu_m", "epp peak CPU (m)", ("containers", "epp", "peak_cpu_m"), True, 0.30)
+        with mock.patch.object(trend, "METRICS", [loose]):
+            self.assertEqual(trend.evaluate(lasting(epp_peak_cpu=2500), "job1")["status"], "ok")
+            self.assertEqual(trend.evaluate(lasting(epp_peak_cpu=2700), "job1")["status"], "regressed")
+
+    def test_failed_run_between_does_not_break_the_pair(self):
+        records = [run_record(day) for day in range(8, 15)]
+        records += [run_record(15, epp_peak_cpu=2500), run_record(16, status="FAILED"), run_record(17, epp_peak_cpu=2500)]
+        verdict = trend.evaluate(records, "job1")
+        self.assertEqual(verdict["status"], "regressed")
+        self.assertEqual(verdict["range_base_commit"], "commit14")
+
     def test_scheduler_latency_regresses(self):
-        verdict = trend.evaluate(history(p95=18.5), "job1")
+        verdict = trend.evaluate(lasting(p95=18.5), "job1")
         self.assertEqual(verdict["status"], "regressed")
         self.assertEqual(result_for(verdict, "scheduler.p95")["verdict"], "regressed")
 
     def test_envoy_and_total_rows_never_regress(self):
-        verdict = trend.evaluate(history(envoy_peak_cpu=5000), "job1")
+        verdict = trend.evaluate(lasting(envoy_peak_cpu=5000), "job1")
         self.assertEqual(verdict["status"], "ok")
         self.assertEqual(result_for(verdict, "envoy-proxy.peak_cpu_m")["verdict"], "over threshold, report only")
         self.assertEqual(result_for(verdict, "TOTAL.peak_cpu_m")["verdict"], "over threshold, report only")
 
     def test_unmeasured_values_are_missing_not_zero(self):
-        records = history(p95=0.0)
+        records = history(tonight={"p95": 0.0})
         for record in records[:4]:
             record["scheduler_latency_ms"]["p99"] = 0.0
         verdict = trend.evaluate(records, "job1")
@@ -119,28 +163,24 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(result_for(verdict, "scheduler.p99")["verdict"], "insufficient baseline")
         self.assertEqual(verdict["status"], "ok")
 
-    def test_custom_threshold(self):
-        verdict = trend.evaluate(history(epp_peak_cpu=2101), "job1", threshold=0.05)
-        self.assertEqual(verdict["status"], "regressed")
-
-    def test_commit_range_uses_newest_baseline_run(self):
+    def test_commit_range_starts_at_the_last_run_before_the_previous_one(self):
         verdict = trend.evaluate(history(), "job1")
-        self.assertEqual(verdict["baseline_commit"], "commit16")
+        self.assertEqual(verdict["range_base_commit"], "commit15")
         self.assertEqual(verdict["tonight"]["epp_commit"], "commit17")
 
 
 class IssueBodyTests(unittest.TestCase):
     def test_body_has_marker_regressed_metrics_and_compare_link(self):
-        verdict = trend.evaluate(history(epp_peak_cpu=2500), "job1")
+        verdict = trend.evaluate(lasting(epp_peak_cpu=2500), "job1")
         body = trend.render_issue_body(verdict, "llm-d/llm-d-router", "https://example.com/run/1")
         self.assertTrue(body.startswith("<!-- perf-trend:job1 -->\n"))
         self.assertIn("epp peak CPU (m)", body)
         self.assertNotIn("epp idle CPU (m)", body)
-        self.assertIn("https://github.com/llm-d/llm-d-router/compare/commit16...commit17", body)
+        self.assertIn("https://github.com/llm-d/llm-d-router/compare/commit15...commit17", body)
         self.assertIn("https://example.com/run/1", body)
 
     def test_missing_commit_has_no_compare_link(self):
-        records = history(epp_peak_cpu=2500)
+        records = lasting(epp_peak_cpu=2500)
         records[-1]["provenance"]["epp_commit"] = None
         verdict = trend.evaluate(records, "job1")
         body = trend.render_issue_body(verdict, "llm-d/llm-d-router")
@@ -184,7 +224,7 @@ class FileTests(unittest.TestCase):
         self.assertEqual(trend.load_records(str(self.directory / "empty"), "job1"), [])
 
     def test_regression_exits_zero_and_writes_issue_body(self):
-        self.write_records(history(epp_peak_cpu=2500))
+        self.write_records(lasting(epp_peak_cpu=2500))
         summary_file = self.directory / "step-summary.md"
         os.environ["GITHUB_STEP_SUMMARY"] = str(summary_file)
         self.assertEqual(self.run_main(), 0)

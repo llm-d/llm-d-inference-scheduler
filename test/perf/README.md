@@ -106,13 +106,15 @@ folder.
 
 ### Trend check
 
-`trend.py` compares the newest run record of a test with the median of the
-successful runs from the 7 days before it that used the same router config,
-perf job and simulator replica count. Each EPP metric that is more than 10%
-worse than that median, in its direction (lower is better for CPU, memory and
-latency), is a regression. With fewer than 4 comparable runs, nothing is
-compared. Envoy and `TOTAL` rows are compared and reported but never count as
-a regression.
+`trend.py` compares the newest run record of a test, and the previous
+successful run with the same router config, perf job and simulator replica
+count, with the comparable successful runs from the 7 days before that
+previous run. An EPP metric regresses when both runs are more than its
+threshold over the baseline median and above every baseline run (lower is
+better for CPU, memory and latency). Every metric's threshold is 10% and is
+set per metric in `METRICS` in `trend.py`. With fewer than 4 baseline runs,
+nothing is compared. Envoy and `TOTAL` rows are compared and reported but
+never count as a regression.
 
 ```bash
 python3 test/perf/trend.py \
@@ -128,14 +130,15 @@ record exits non-zero.
 
 What to expect from the rule:
 
-- A single run more than 10% worse is reported the same night.
-- A lasting regression is reported every night until it becomes part of the
-  7-day median, about 4 runs later, and then stops being reported without
-  being fixed.
-- A metric whose run-to-run spread is near 10% is reported on and off. The
-  summary shows each metric's baseline range so this can be judged.
+- A regression opens or updates the issue on its second run. The first run is
+  shown as over threshold in the summary.
+- A single bad run does not open an issue.
+- A lasting regression is reported once. From its third run on, its first run
+  is in the baseline, so a regression that stays at the same level is no
+  longer above every baseline run.
 - Run records start with the first run that writes them, so the first
-  comparison happens after 4 comparable successful runs.
+  comparison happens after 5 comparable successful runs: 4 for the baseline
+  and the previous run.
 
 ### Offline regression tests
 
