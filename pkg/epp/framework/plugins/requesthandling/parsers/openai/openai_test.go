@@ -1632,6 +1632,24 @@ func TestOpenAIParser_RepackagePreservesLargeJSONInteger(t *testing.T) {
 	}
 }
 
+func TestOpenAIParser_ResponsesWirePayloadKeepsClientBytes(t *testing.T) {
+	// Tool parameters are rendered into the prompt as JSON, so a reordered key changes the tokens.
+	body := []byte(`{"model":"test","input":"hi","tools":[{"type":"function","name":"lookup",` +
+		`"parameters":{"type":"object","required":["zip"],"properties":{"zip":{"type":"string"},"city":{"type":"string"}}}}]}`)
+
+	result, err := NewOpenAIParser().ParseRequest(context.Background(), body, map[string]string{":path": "/v1/responses"})
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+	got, err := benchWireBytes(result)
+	if err != nil {
+		t.Fatalf("wire bytes: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Errorf("WirePayload() =\n%s\nwant the client body\n%s", got, body)
+	}
+}
+
 func TestOpenAIParser_RewriteModelNamePreservesTokenInput(t *testing.T) {
 	parser := NewOpenAIParser()
 	tests := []struct {
